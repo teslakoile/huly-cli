@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "huly-cli"
+version = "0.1.0"
+description = "CLI for Huly project management"
+requires-python = ">=3.11"
+dependencies = [
+    "typer>=0.15.0,<1.0",
+    "httpx>=0.28.0,<1.0",
+    "rich>=13.9.0,<14.0",
+    "pydantic>=2.10.0,<3.0",
+    "python-dotenv>=1.0.0,<2.0",
+    "tomli-w>=1.1.0,<2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24.0",
+    "respx>=0.22.0",
+    "ruff>=0.8.0",
+    "pre-commit>=3.5.0",
+]
+
+[project.scripts]
+huly = "huly_cli.main:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/huly_cli"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "RUF", # ruff-specific rules
+]
+ignore = [
+    "E501",  # line-too-long (handled by formatter)
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
