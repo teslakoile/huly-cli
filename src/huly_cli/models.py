@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import IntEnum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -114,3 +115,130 @@ class TagReference(BaseModel):
     tag: str
     title: str
     attached_to: str = Field("", alias="attachedTo")
+
+
+# ── Document / Teamspace ──────────────────────────────────────────────────────
+
+
+class Teamspace(BaseModel):
+    model_config = {"populate_by_name": True}
+
+    id: str = Field(alias="_id")
+    name: str
+    description: str = ""
+    private: bool = False
+    archived: bool = False
+    members: list[str] = []
+    owners: list[str] = []
+
+
+class Document(BaseModel):
+    """A Huly document stored in a Teamspace (document:class:Document)."""
+
+    model_config = {"populate_by_name": True}
+
+    id: str = Field(alias="_id")
+    title: str = ""
+    content: str = ""  # blob ref (empty string if no content yet)
+    space: str = ""
+    parent: str = Field("", alias="parent")
+    attachments: int = 0
+    labels: int = 0
+    comments: int = 0
+    rank: str = ""
+    created_by: str = Field("", alias="createdBy")
+    created_on: int = Field(0, alias="createdOn")
+    modified_by: str = Field("", alias="modifiedBy")
+    modified_on: int = Field(0, alias="modifiedOn")
+
+
+# ── Component ─────────────────────────────────────────────────────────────────
+
+
+class Component(BaseModel):
+    """A tracker component scoped to a project (tracker:class:Component)."""
+
+    model_config = {"populate_by_name": True}
+
+    id: str = Field(alias="_id")
+    label: str = ""
+    description: str = ""
+    lead: str | None = None  # Person ID
+    space: str = ""
+    created_by: str = Field("", alias="createdBy")
+    created_on: int = Field(0, alias="createdOn")
+    modified_by: str = Field("", alias="modifiedBy")
+    modified_on: int = Field(0, alias="modifiedOn")
+
+
+# ── Milestone ─────────────────────────────────────────────────────────────────
+
+
+class MilestoneStatus(IntEnum):
+    PLANNED = 0
+    IN_PROGRESS = 1
+    COMPLETED = 2
+    CANCELLED = 3
+
+
+MILESTONE_STATUS_LABELS: dict[int, str] = {
+    0: "planned",
+    1: "in-progress",
+    2: "completed",
+    3: "cancelled",
+}
+
+MILESTONE_STATUS_FROM_NAME: dict[str, int] = {v: k for k, v in MILESTONE_STATUS_LABELS.items()}
+
+
+class Milestone(BaseModel):
+    """A tracker milestone scoped to a project (tracker:class:Milestone)."""
+
+    model_config = {"populate_by_name": True}
+
+    id: str = Field(alias="_id")
+    label: str = ""
+    status: int = 0
+    target_date: int | None = Field(None, alias="targetDate")
+    comments: int = 0
+    space: str = ""
+    created_by: str = Field("", alias="createdBy")
+    created_on: int = Field(0, alias="createdOn")
+    modified_by: str = Field("", alias="modifiedBy")
+    modified_on: int = Field(0, alias="modifiedOn")
+
+    @property
+    def status_name(self) -> str:
+        return MILESTONE_STATUS_LABELS.get(self.status, str(self.status))
+
+
+# ── IssueTemplate ─────────────────────────────────────────────────────────────
+
+
+class IssueTemplate(BaseModel):
+    """An issue template (tracker:class:IssueTemplate).
+
+    The description field stores inline ProseMirror JSON (dict), not a blob ref.
+    """
+
+    model_config = {"populate_by_name": True}
+
+    id: str = Field(alias="_id")
+    title: str = ""
+    description: Any = None  # inline ProseMirror dict or empty string
+    assignee: str | None = None
+    component: str | None = None
+    milestone: str | None = None
+    priority: int = 0
+    estimation: int = 0
+    children: list[Any] = []
+    comments: int = 0
+    attachments: int = 0
+    labels: int = 0
+    kind: str = ""
+    relations: list[Any] = []
+    space: str = ""
+
+    @property
+    def priority_name(self) -> str:
+        return PRIORITY_LABELS.get(self.priority, str(self.priority))
