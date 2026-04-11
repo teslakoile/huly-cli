@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import secrets
-import time
 from typing import Annotated, Any
 
 import typer
@@ -14,12 +13,15 @@ from huly_cli.auth import ensure_auth
 from huly_cli.client import HulyClient
 from huly_cli.config import load_config
 from huly_cli.errors import AuthError, HulyError, NotFoundError
-from huly_cli.models import (
-    PRIORITY_FROM_NAME,
-    STATUS_IDS,
-    Issue,
-    Person,
+from huly_cli.issue_utils import (
+    IssueStatusIndex,
+    load_issue_status_index,
+    next_rank,
+    resolve_status_id,
+    resolve_status_ids,
+    status_label,
 )
+from huly_cli.models import PRIORITY_FROM_NAME, STATUS_IDS, Issue, Person, Project
 from huly_cli.output import (
     console,
     is_json_mode,
@@ -43,28 +45,152 @@ async def _fetch_person_map(client: HulyClient) -> dict[str, str]:
     return {p.id: p.display_name for p in persons}
 
 
-def _resolve_status_filter(status_name: str) -> str | None:
-    key = status_name.lower().replace(" ", "-")
-    return STATUS_IDS.get(key)
+def _normalize_issue_doc(raw: dict[str, Any]) -> dict[str, Any]:
+    """Coerce live issue documents into the local model's shape."""
+    normalized = dict(raw)
+    if normalized.get("description") is None:
+        normalized["description"] = ""
+    return normalized
 
 
-def _issue_to_row(issue: Issue, person_map: dict[str, str]) -> dict[str, Any]:
+def _issue_from_raw(raw: dict[str, Any]) -> Issue:
+    return Issue.model_validate(_normalize_issue_doc(raw))
+
+
+async def _resolve_project_by_identifier(client: HulyClient, identifier: str) -> Project:
+    projects = await client.find_all(
+        "tracker:class:Project",
+        query={"identifier": identifier.upper()},
+        options={"limit": 1},
+    )
+    if not projects:
+        raise NotFoundError(f"Project '{identifier}' not found.")
+    return Project.model_validate(projects[0])
+
+
+async def _find_issue_by_identifier_or_id(client: HulyClient, identifier: str) -> Issue:
+    lookup = identifier.upper()
+    raw_docs = await client.find_all(
+        "tracker:class:Issue",
+        query={"identifier": lookup},
+        options={"limit": 1},
+    )
+    if not raw_docs:
+        raw_docs = await client.find_all(
+            "tracker:class:Issue",
+            query={"_id": identifier},
+            options={"limit": 1},
+        )
+    if not raw_docs:
+        raise NotFoundError(f"Issue '{identifier}' not found.")
+    return _issue_from_raw(raw_docs[0])
+
+
+def _format_status_label(issue: Issue, status_index: IssueStatusIndex | None = None) -> str:
+    """Prefer the live status index when the built-in mapping cannot resolve a value."""
+    label = issue.status_name
+    if label == issue.status:
+        return status_label(issue.status, status_index)
+    return label
+
+
+async def _resolve_person_by_name(client: HulyClient, name: str) -> str:
+    """Fuzzy-match a person by name and return their ID."""
+    raw = await client.find_all("contact:class:Person", options={"limit": 500})
+    needle = name.lower()
+    for doc in raw:
+        person = Person.model_validate(doc)
+        if needle in person.display_name.lower() or needle in person.name.lower():
+            return person.id
+    raise NotFoundError(f"Person '{name}' not found.")
+
+
+def _resolve_priority_value(priority: str) -> int:
+    """Resolve a priority name or numeric string to the tracker integer value."""
+    try:
+        return int(priority)
+    except ValueError:
+        priority_int = PRIORITY_FROM_NAME.get(priority.lower())
+        if priority_int is None:
+            valid = ", ".join(PRIORITY_FROM_NAME.keys())
+            raise HulyError(f"Unknown priority '{priority}'. Valid values: {valid}") from None
+        return priority_int
+
+
+async def _resolve_issue_status_id(
+    client: HulyClient,
+    raw_status: str | None,
+    *,
+    preferred: str | None = None,
+) -> str:
+    """Resolve a status name/id to the concrete status id used by the workspace."""
+    if raw_status is None:
+        return preferred or STATUS_IDS["backlog"]
+
+    status_index = await load_issue_status_index(client)
+    try:
+        return resolve_status_id(raw_status, status_index, preferred=preferred)
+    except ValueError as exc:
+        valid = ", ".join(status_index.available_labels())
+        raise HulyError(f"Unknown status '{raw_status}'. Valid values: {valid}") from exc
+
+
+async def _next_issue_number_and_rank(
+    client: HulyClient,
+    project: Project,
+) -> tuple[int, str, str]:
+    """Increment the project sequence and derive the new issue identifier and rank."""
+    raw = await client.find_all(
+        "tracker:class:Issue",
+        query={"space": project.id},
+        options={"limit": 1, "sort": {"rank": -1}},
+    )
+    last_rank = raw[0].get("rank") if raw else None
+
+    increment_result = await client.tx(
+        {
+            "_class": "core:class:TxUpdateDoc",
+            "objectClass": "tracker:class:Project",
+            "objectSpace": "core:space:Space",
+            "objectId": project.id,
+            "operations": {"$inc": {"sequence": 1}},
+            "retrieve": True,
+        }
+    )
+    number = increment_result.get("object", {}).get("sequence")
+    if not isinstance(number, int):
+        number = project.sequence + 1
+
+    identifier = f"{project.identifier}-{number}" if project.identifier else str(number)
+    return number, identifier, next_rank(last_rank)
+
+
+def _issue_to_row(
+    issue: Issue,
+    person_map: dict[str, str],
+    status_index: IssueStatusIndex | None = None,
+) -> dict[str, Any]:
     assignee_name = person_map.get(issue.assignee, issue.assignee) if issue.assignee else ""
     return {
         "identifier": issue.identifier or issue.id,
         "title": issue.title,
-        "status": issue.status_name,
+        "status": _format_status_label(issue, status_index),
         "priority": issue.priority_name,
         "assignee": assignee_name,
     }
 
 
-def _issue_to_detail(issue: Issue, person_map: dict[str, str]) -> dict[str, Any]:
+def _issue_to_detail(
+    issue: Issue,
+    person_map: dict[str, str],
+    status_index: IssueStatusIndex | None = None,
+) -> dict[str, Any]:
     assignee_name = person_map.get(issue.assignee, issue.assignee) if issue.assignee else ""
     return {
         "identifier": issue.identifier or issue.id,
         "title": issue.title,
-        "status": issue.status_name,
+        "status": _format_status_label(issue, status_index),
+        "status_id": issue.status,
         "priority": issue.priority_name,
         "assignee": assignee_name,
         "id": issue.id,
@@ -119,25 +245,57 @@ def issues_list(
         auth = await ensure_auth(config)
         async with HulyClient(config, auth) as client:
             query: dict[str, Any] = {}
-            if status:
-                status_id = _resolve_status_filter(status)
-                if not status_id:
-                    valid = ", ".join(STATUS_IDS.keys())
-                    raise HulyError(f"Unknown status '{status}'. Valid values: {valid}")
-                query["status"] = status_id
-
-            raw = await client.find_all(
-                "tracker:class:Issue",
-                query=query,
-                options={"limit": limit},
-            )
-            issues = [Issue.model_validate(doc) for doc in raw]
+            status_index: IssueStatusIndex | None = None
+            status_ids: list[str] = []
 
             if project:
-                prefix = project.upper() + "-"
-                issues = [i for i in issues if i.identifier.upper().startswith(prefix)]
+                project_doc = await _resolve_project_by_identifier(client, project)
+                query["space"] = project_doc.id
+
+            if status:
+                status_ids = resolve_status_ids(status, status_index)
+                if not status_ids:
+                    status_index = await load_issue_status_index(client)
+                    status_ids = resolve_status_ids(status, status_index)
+                if not status_ids:
+                    valid = ", ".join(
+                        status_index.available_labels() if status_index else STATUS_IDS.keys()
+                    )
+                    raise HulyError(f"Unknown status '{status}'. Valid values: {valid}")
+
+            if len(status_ids) <= 1:
+                if status_ids:
+                    query["status"] = status_ids[0]
+                raw = await client.find_all(
+                    "tracker:class:Issue",
+                    query=query,
+                    options={"limit": limit},
+                )
+            else:
+                raw = []
+                seen: set[str] = set()
+                for status_id in status_ids:
+                    scoped_query = {**query, "status": status_id}
+                    scoped_rows = await client.find_all(
+                        "tracker:class:Issue",
+                        query=scoped_query,
+                        options={"limit": limit},
+                    )
+                    for doc in scoped_rows:
+                        doc_id = doc.get("_id")
+                        if not isinstance(doc_id, str) or doc_id in seen:
+                            continue
+                        seen.add(doc_id)
+                        raw.append(doc)
+                        if len(raw) >= limit:
+                            break
+                    if len(raw) >= limit:
+                        break
+            issues = [_issue_from_raw(doc) for doc in raw]
 
             person_map = await _fetch_person_map(client)
+            if status_index is None and any(issue.status_name == issue.status for issue in issues):
+                status_index = await load_issue_status_index(client)
 
         if assignee:
             needle = assignee.lower()
@@ -145,7 +303,7 @@ def issues_list(
                 i for i in issues if i.assignee and needle in person_map.get(i.assignee, "").lower()
             ]
 
-        return [_issue_to_row(i, person_map) for i in issues]
+        return [_issue_to_row(i, person_map, status_index) for i in issues]
 
     try:
         rows = asyncio.run(_run())
@@ -178,16 +336,12 @@ def issues_get(
     async def _run() -> dict[str, Any]:
         auth = await ensure_auth(config)
         async with HulyClient(config, auth) as client:
-            raw = await client.find_all(
-                "tracker:class:Issue",
-                query={"identifier": identifier.upper()},
-                options={"limit": 1},
-            )
-            if not raw:
-                raise NotFoundError(f"Issue '{identifier}' not found.")
-            issue = Issue.model_validate(raw[0])
+            issue = await _find_issue_by_identifier_or_id(client, identifier)
             person_map = await _fetch_person_map(client)
-        return _issue_to_detail(issue, person_map)
+            status_index = None
+            if issue.status_name == issue.status:
+                status_index = await load_issue_status_index(client)
+        return _issue_to_detail(issue, person_map, status_index)
 
     try:
         data = asyncio.run(_run())
@@ -211,7 +365,7 @@ def issues_create(
     project: Annotated[
         str, typer.Option("--project", help='Project identifier (e.g. "ROA").')
     ] = ...,
-    status: Annotated[str, typer.Option("--status", help="Status name.")] = "backlog",
+    status: Annotated[str | None, typer.Option("--status", help="Status name or id.")] = None,
     priority: Annotated[str, typer.Option("--priority", help="Priority name or number.")] = "none",
     assignee: Annotated[
         str | None, typer.Option("--assignee", help="Assignee person name (fuzzy match).")
@@ -243,111 +397,69 @@ async def _create_impl(
     config,
     title: str,
     project: str,
-    status: str,
+    status: str | None,
     priority: str,
     assignee: str | None,
     description: str | None,
 ) -> str:
     auth = await ensure_auth(config)
     async with HulyClient(config, auth) as client:
-        # Resolve project by identifier (normalise to uppercase, e.g. "roa" → "ROA")
-        projects = await client.find_all("tracker:class:Project", {"identifier": project.upper()})
-        if not projects:
-            raise NotFoundError(f"Project '{project}' not found.")
-        proj = projects[0]
-        project_id: str = proj["_id"]
-
-        # Resolve status
-        status_key = status.lower().replace(" ", "-")
-        status_id = STATUS_IDS.get(status_key)
-        if status_id is None:
-            raise NotFoundError(
-                f"Unknown status '{status}'. Valid values: {', '.join(STATUS_IDS.keys())}"
-            )
-
-        # Resolve priority
-        try:
-            priority_int = int(priority)
-        except ValueError:
-            priority_int = PRIORITY_FROM_NAME.get(priority.lower())
-            if priority_int is None:
-                raise NotFoundError(
-                    f"Unknown priority '{priority}'. Valid values: {', '.join(PRIORITY_FROM_NAME.keys())}"
-                ) from None
-
-        # Resolve assignee
-        person_id: str | None = None
-        if assignee:
-            persons = await client.find_all("contact:class:Person")
-            query_lower = assignee.lower()
-            match = None
-            for p in persons:
-                name: str = p.get("name", "")
-                # Build display name for matching: "LastName,FirstName" -> "FirstName LastName"
-                parts = name.split(",", 1)
-                display = f"{parts[1].strip()} {parts[0].strip()}" if len(parts) == 2 else name
-                if query_lower in display.lower() or query_lower in name.lower():
-                    match = p
-                    break
-            if match is None:
-                raise NotFoundError(f"Person '{assignee}' not found.")
-            person_id = match["_id"]
-
-        # Generate new issue ID
+        project_doc = await _resolve_project_by_identifier(client, project)
+        status_id = await _resolve_issue_status_id(
+            client,
+            status,
+            preferred=project_doc.default_issue_status or None,
+        )
+        priority_int = _resolve_priority_value(priority)
+        person_id = await _resolve_person_by_name(client, assignee) if assignee else None
         new_id = secrets.token_hex(12)
+        number, identifier_value, rank = await _next_issue_number_and_rank(client, project_doc)
+
+        description_ref: str | None = None
+        if description:
+            from huly_cli.markup import markdown_to_prosemirror
+
+            markup = markdown_to_prosemirror(description)
+            description_ref = await client.create_description(new_id, markup)
+            if not description_ref:
+                raise HulyError("Failed to create issue description content via Collaborator RPC.")
 
         transaction = {
             "_class": "core:class:TxCreateDoc",
             "objectClass": "tracker:class:Issue",
-            "objectSpace": project_id,
+            "objectSpace": project_doc.id,
             "objectId": new_id,
             "attributes": {
                 "title": title,
-                "description": "",
+                "description": description_ref,
                 "status": status_id,
                 "priority": priority_int,
                 "assignee": person_id,
                 "kind": "tracker:taskTypes:Issue",
                 "component": None,
                 "milestone": None,
-                "number": 0,
+                "number": number,
                 "estimation": 0,
                 "remainingTime": 0,
                 "reportedTime": 0,
                 "reports": 0,
                 "relations": [],
+                "identifier": identifier_value,
+                "attachedTo": "tracker:ids:NoParent",
                 "parents": [],
                 "childInfo": [],
                 "dueDate": None,
-                "rank": "",
+                "rank": rank,
                 "comments": 0,
                 "subIssues": 0,
                 "labels": 0,
-                "attachedTo": "tracker:ids:NoParent",
-                "attachedToClass": "tracker:class:Issue",
-                "collection": "subIssues",
             },
-            "modifiedBy": auth.account_id,
-            "modifiedOn": int(time.time() * 1000),
         }
 
         await client.tx(transaction)
-
-        # Set description if provided (requires issue to exist first so it has a blob ref)
-        if description:
-            # Re-fetch the created issue to get its blob ref
-            created = await client.find_all(
-                "tracker:class:Issue", {"_id": new_id}, options={"limit": 1}
-            )
-            if created and created[0].get("description"):
-                from huly_cli.markup import markdown_to_prosemirror
-
-                markup = markdown_to_prosemirror(description)
-                ok = await client.set_description(new_id, created[0]["description"], markup)
-                if not ok:
-                    print_warning("Issue created but description could not be set.")
-
-        return f"Issue created in project {project} (id: {new_id})"
+        return (
+            f"Issue {identifier_value} created in project {project_doc.identifier} (id: {new_id})"
+        )
 
 
 @app.command("update")
@@ -393,13 +505,7 @@ async def _update_impl(
 ) -> None:
     auth = await ensure_auth(config)
     async with HulyClient(config, auth) as client:
-        # Find existing issue by identifier (normalise to uppercase, e.g. "roa-1" → "ROA-1")
-        issues = await client.find_all("tracker:class:Issue", {"identifier": identifier.upper()})
-        if not issues:
-            raise NotFoundError(f"Issue '{identifier}' not found.")
-        issue = issues[0]
-        issue_id: str = issue["_id"]
-        issue_space: str = issue.get("space", "")
+        issue = await _find_issue_by_identifier_or_id(client, identifier)
 
         operations: dict = {}
 
@@ -407,43 +513,16 @@ async def _update_impl(
             operations["title"] = title
 
         if status is not None:
-            status_key = status.lower().replace(" ", "-")
-            status_id = STATUS_IDS.get(status_key)
-            if status_id is None:
-                raise NotFoundError(
-                    f"Unknown status '{status}'. Valid values: {', '.join(STATUS_IDS.keys())}"
-                )
-            operations["status"] = status_id
+            operations["status"] = await _resolve_issue_status_id(client, status)
 
         if priority is not None:
-            try:
-                priority_int = int(priority)
-            except ValueError:
-                priority_int = PRIORITY_FROM_NAME.get(priority.lower())
-                if priority_int is None:
-                    raise NotFoundError(
-                        f"Unknown priority '{priority}'. Valid values: {', '.join(PRIORITY_FROM_NAME.keys())}"
-                    ) from None
-            operations["priority"] = priority_int
+            operations["priority"] = _resolve_priority_value(priority)
 
         if assignee is not None:
             if assignee == "":
-                # Unassign
                 operations["assignee"] = None
             else:
-                persons = await client.find_all("contact:class:Person")
-                query_lower = assignee.lower()
-                match = None
-                for p in persons:
-                    name: str = p.get("name", "")
-                    parts = name.split(",", 1)
-                    display = f"{parts[1].strip()} {parts[0].strip()}" if len(parts) == 2 else name
-                    if query_lower in display.lower() or query_lower in name.lower():
-                        match = p
-                        break
-                if match is None:
-                    raise NotFoundError(f"Person '{assignee}' not found.")
-                operations["assignee"] = match["_id"]
+                operations["assignee"] = await _resolve_person_by_name(client, assignee)
 
         if not operations:
             print_warning(
@@ -454,11 +533,9 @@ async def _update_impl(
         transaction = {
             "_class": "core:class:TxUpdateDoc",
             "objectClass": "tracker:class:Issue",
-            "objectSpace": issue_space,
-            "objectId": issue_id,
+            "objectSpace": issue.space,
+            "objectId": issue.id,
             "operations": operations,
-            "modifiedBy": auth.account_id,
-            "modifiedOn": int(time.time() * 1000),
         }
 
         await client.tx(transaction)
@@ -512,23 +589,27 @@ def issues_describe(
 
             auth = await ensure_auth(config)
             async with HulyClient(config, auth) as client:
-                raw_docs = await client.find_all(
-                    "tracker:class:Issue",
-                    query={"identifier": identifier.upper()},
-                    options={"limit": 1},
-                )
-                if not raw_docs:
-                    raise NotFoundError(f"Issue '{identifier}' not found.")
-                issue = Issue.model_validate(raw_docs[0])
-                if not issue.description:
-                    raise HulyError(
-                        f"Issue '{identifier}' has no description blob ref. "
-                        "Cannot update a description that was never created."
-                    )
                 markup = markdown_to_prosemirror(markdown_content or "")
-                ok = await client.set_description(issue.id, issue.description, markup)
-                if not ok:
-                    raise HulyError("Failed to update description via Collaborator RPC.")
+                issue = await _find_issue_by_identifier_or_id(client, identifier)
+                if issue.description:
+                    ok = await client.set_description(issue.id, issue.description, markup)
+                    if not ok:
+                        raise HulyError("Failed to update description via Collaborator RPC.")
+                else:
+                    blob_ref = await client.create_description(issue.id, markup)
+                    if not blob_ref:
+                        raise HulyError(
+                            "Failed to create description content via Collaborator RPC."
+                        )
+                    await client.tx(
+                        {
+                            "_class": "core:class:TxUpdateDoc",
+                            "objectClass": "tracker:class:Issue",
+                            "objectSpace": issue.space,
+                            "objectId": issue.id,
+                            "operations": {"description": blob_ref},
+                        }
+                    )
             return issue.identifier or identifier
 
         try:
@@ -556,14 +637,7 @@ def issues_describe(
     async def _run() -> tuple[str, str | None]:
         auth = await ensure_auth(config)
         async with HulyClient(config, auth) as client:
-            raw_docs = await client.find_all(
-                "tracker:class:Issue",
-                query={"identifier": identifier.upper()},
-                options={"limit": 1},
-            )
-            if not raw_docs:
-                raise NotFoundError(f"Issue '{identifier}' not found.")
-            issue = Issue.model_validate(raw_docs[0])
+            issue = await _find_issue_by_identifier_or_id(client, identifier)
             if not issue.description:
                 return issue.identifier or identifier, None
             content = await client.get_description(issue.id, issue.description)

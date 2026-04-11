@@ -32,9 +32,10 @@ class HulyClient:
         options: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Query documents via POST /api/v1/find-all/{workspace_id}."""
+        query = query or {}
         body = {
             "_class": class_id,
-            "query": query or {},
+            "query": query,
             "options": options or {},
         }
         resp = await self._http.post(
@@ -42,7 +43,7 @@ class HulyClient:
             json=body,
         )
         data = self._handle_response(resp)
-        return data.get("value", [])
+        return self._normalize_find_all_result(class_id, query, data)
 
     async def tx(self, transaction: dict[str, Any]) -> dict[str, Any]:
         """Execute a transaction via POST /api/v1/tx/{workspace_id}."""
@@ -105,6 +106,41 @@ class HulyClient:
             print_warning(f"getContent error: {e}")
             return None
 
+    async def create_content(
+        self, class_id: str, object_id: str, field: str, markup_json: str
+    ) -> str | None:
+        """Create entity content via Collaborator RPC and return its blob ref."""
+        doc_id = self._build_doc_id(class_id, object_id, field)
+        url = f"{self._config.url}/_collaborator/rpc/{doc_id}"
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as http:
+                resp = await http.post(
+                    url,
+                    headers={
+                        "Authorization": f"Bearer {self._auth.workspace_token}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "method": "createContent",
+                        "payload": {
+                            "content": {field: json_mod.loads(markup_json)},
+                        },
+                    },
+                )
+                if resp.status_code != 200:
+                    print_warning(
+                        f"createContent failed (HTTP {resp.status_code}): {resp.text[:200]}"
+                    )
+                    return None
+                data = resp.json()
+                blob_ref = data.get("content", {}).get(field)
+                if blob_ref is None:
+                    return None
+                return str(blob_ref)
+        except Exception as e:
+            print_warning(f"createContent error: {e}")
+            return None
+
     async def set_content(
         self, class_id: str, object_id: str, field: str, blob_ref: str, markup_json: str
     ) -> bool:
@@ -147,6 +183,12 @@ class HulyClient:
         """
         return await self.get_content("tracker:class:Issue", issue_id, "description", blob_ref)
 
+    async def create_description(self, issue_id: str, markup_json: str) -> str | None:
+        """Create issue description content and return the blob ref."""
+        return await self.create_content(
+            "tracker:class:Issue", issue_id, "description", markup_json
+        )
+
     async def set_description(self, issue_id: str, blob_ref: str, markup_json: str) -> bool:
         """Update issue description via Collaborator RPC.
 
@@ -182,6 +224,52 @@ class HulyClient:
             return resp.json()
         except Exception:
             return {}
+
+    def _normalize_find_all_result(
+        self,
+        class_id: str,
+        query: dict[str, Any],
+        data: dict[str, Any] | list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Mirror the upstream REST client normalization for `find-all`.
+
+        The platform client restores scalar query values that may be omitted in
+        filtered results and resolves lookup references using the response's
+        `lookupMap`.
+        """
+        if isinstance(data, dict):
+            lookup_map = data.pop("lookupMap", None)
+            rows = data.get("value", [])
+        else:
+            lookup_map = None
+            rows = data
+
+        if not isinstance(rows, list):
+            return []
+
+        if isinstance(lookup_map, dict):
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                lookup = row.get("$lookup")
+                if not isinstance(lookup, dict):
+                    continue
+                for key, value in list(lookup.items()):
+                    if isinstance(value, list):
+                        lookup[key] = [lookup_map.get(item) for item in value]
+                    else:
+                        lookup[key] = lookup_map.get(value)
+
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            if row.get("_class") is None:
+                row["_class"] = class_id
+            for key, value in query.items():
+                if isinstance(value, (str, int, bool)) and row.get(key) is None:
+                    row[key] = value
+
+        return rows
 
     # ── Context manager ───────────────────────────────────────────────────────
 

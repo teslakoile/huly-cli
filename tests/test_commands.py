@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import ExitStack, contextmanager
 from unittest.mock import AsyncMock, patch
 
 from typer.testing import CliRunner
@@ -23,9 +24,20 @@ FAKE_AUTH = AuthCache(
 )
 
 
+@contextmanager
 def _auth_patch():
-    """Patch ensure_auth to return FAKE_AUTH directly (used by all sub-commands)."""
-    return patch("huly_cli.auth.ensure_auth", new=AsyncMock(return_value=FAKE_AUTH))
+    """Patch every command module that imported ensure_auth directly."""
+    auth_mock = AsyncMock(return_value=FAKE_AUTH)
+    modules = [
+        "huly_cli.auth",
+        "huly_cli.commands.issues",
+        "huly_cli.commands.documents",
+        "huly_cli.commands.components",
+    ]
+    with ExitStack() as stack:
+        for module in modules:
+            stack.enter_context(patch(f"{module}.ensure_auth", new=auth_mock))
+        yield auth_mock
 
 
 # ── projects list ──────────────────────────────────────────────────────────────
