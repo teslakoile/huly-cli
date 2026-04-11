@@ -70,9 +70,16 @@ class HulyClient:
 
     # ── Collaborator RPC ──────────────────────────────────────────────────────
 
-    async def get_description(self, issue_id: str, blob_ref: str) -> str | None:
-        """Fetch issue description ProseMirror JSON via Collaborator RPC."""
-        doc_id = self._build_doc_id(issue_id)
+    async def get_content(
+        self, class_id: str, object_id: str, field: str, blob_ref: str
+    ) -> str | None:
+        """Fetch entity content ProseMirror JSON via Collaborator RPC.
+
+        Works for any entity class and field, e.g.:
+          - class_id="tracker:class:Issue", field="description"
+          - class_id="document:class:Document", field="content"
+        """
+        doc_id = self._build_doc_id(class_id, object_id, field)
         url = f"{self._config.url}/_collaborator/rpc/{doc_id}"
         try:
             async with httpx.AsyncClient(timeout=15.0) as http:
@@ -88,7 +95,7 @@ class HulyClient:
                     print_warning(f"getContent returned HTTP {resp.status_code}: {resp.text[:200]}")
                     return None
                 data = resp.json()
-                content = data.get("content", {}).get("description")
+                content = data.get("content", {}).get(field)
                 if content is None:
                     return None
                 if isinstance(content, (dict, list)):
@@ -98,9 +105,14 @@ class HulyClient:
             print_warning(f"getContent error: {e}")
             return None
 
-    async def set_description(self, issue_id: str, blob_ref: str, markup_json: str) -> bool:
-        """Update issue description via Collaborator RPC."""
-        doc_id = self._build_doc_id(issue_id)
+    async def set_content(
+        self, class_id: str, object_id: str, field: str, blob_ref: str, markup_json: str
+    ) -> bool:
+        """Update entity content via Collaborator RPC.
+
+        Works for any entity class and field.
+        """
+        doc_id = self._build_doc_id(class_id, object_id, field)
         url = f"{self._config.url}/_collaborator/rpc/{doc_id}"
         try:
             async with httpx.AsyncClient(timeout=15.0) as http:
@@ -114,7 +126,7 @@ class HulyClient:
                         "method": "updateContent",
                         "payload": {
                             "source": blob_ref,
-                            "content": {"description": json_mod.loads(markup_json)},
+                            "content": {field: json_mod.loads(markup_json)},
                         },
                     },
                 )
@@ -128,9 +140,25 @@ class HulyClient:
             print_warning(f"updateContent error: {e}")
             return False
 
-    def _build_doc_id(self, issue_id: str) -> str:
-        """URL-encode the collaborator document ID for an issue description."""
-        raw = f"{self._auth.workspace_uuid}|tracker:class:Issue|{issue_id}|description"
+    async def get_description(self, issue_id: str, blob_ref: str) -> str | None:
+        """Fetch issue description ProseMirror JSON via Collaborator RPC.
+
+        Thin wrapper around get_content for tracker:class:Issue / description.
+        """
+        return await self.get_content("tracker:class:Issue", issue_id, "description", blob_ref)
+
+    async def set_description(self, issue_id: str, blob_ref: str, markup_json: str) -> bool:
+        """Update issue description via Collaborator RPC.
+
+        Thin wrapper around set_content for tracker:class:Issue / description.
+        """
+        return await self.set_content(
+            "tracker:class:Issue", issue_id, "description", blob_ref, markup_json
+        )
+
+    def _build_doc_id(self, class_id: str, object_id: str, field: str) -> str:
+        """URL-encode the collaborator document ID for any entity class and field."""
+        raw = f"{self._auth.workspace_uuid}|{class_id}|{object_id}|{field}"
         return urllib.parse.quote(raw, safe="")
 
     # ── Response handling ─────────────────────────────────────────────────────

@@ -6,7 +6,17 @@ from typing import Annotated
 
 import typer
 
-from huly_cli.commands import auth_cmd, issues, labels, members, projects
+from huly_cli.commands import (
+    auth_cmd,
+    components,
+    documents,
+    issues,
+    labels,
+    members,
+    milestones,
+    projects,
+    templates,
+)
 from huly_cli.errors import HulyError, handle_error
 from huly_cli.output import set_json_mode
 
@@ -22,6 +32,10 @@ app.add_typer(projects.app, name="projects")
 app.add_typer(issues.app, name="issues")
 app.add_typer(members.app, name="members")
 app.add_typer(labels.app, name="labels")
+app.add_typer(documents.app, name="documents")
+app.add_typer(components.app, name="components")
+app.add_typer(milestones.app, name="milestones")
+app.add_typer(templates.app, name="templates")
 
 
 @app.callback()

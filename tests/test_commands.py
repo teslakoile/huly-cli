@@ -287,3 +287,114 @@ def test_issues_list_json_mode():
     assert data["ok"] is True
     assert len(data["data"]) == 1
     assert data["data"][0]["title"] == "Fix bug"
+
+
+# ── documents list ─────────────────────────────────────────────────────────────
+
+DOCUMENT_DATA = [
+    {
+        "_id": "doc1",
+        "title": "My Doc",
+        "content": "blob-ref-123",
+        "space": "ts1",
+        "parent": "document:ids:NoParent",
+        "attachments": 0,
+        "labels": 0,
+        "comments": 0,
+        "rank": "",
+        "createdBy": "",
+        "createdOn": 0,
+        "modifiedBy": "",
+        "modifiedOn": 0,
+    }
+]
+
+TEAMSPACE_DATA = [
+    {
+        "_id": "ts1",
+        "name": "Engineering",
+        "description": "",
+        "private": False,
+        "archived": False,
+        "members": [],
+        "owners": [],
+    }
+]
+
+
+def test_documents_list():
+    # find_all called twice: once for teamspaces, once for documents
+    find_mock = AsyncMock(side_effect=[TEAMSPACE_DATA, DOCUMENT_DATA])
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["documents", "list"])
+    assert result.exit_code == 0, result.output
+    assert "My Doc" in result.output
+
+
+def test_documents_list_empty():
+    find_mock = AsyncMock(side_effect=[TEAMSPACE_DATA, []])
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["documents", "list"])
+    assert result.exit_code == 0
+
+
+def test_documents_list_shows_space():
+    find_mock = AsyncMock(side_effect=[TEAMSPACE_DATA, DOCUMENT_DATA])
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["documents", "list"])
+    assert result.exit_code == 0, result.output
+    assert "Engineering" in result.output
+
+
+# ── components list ────────────────────────────────────────────────────────────
+
+COMPONENT_DATA = [
+    {
+        "_id": "c1",
+        "label": "Auth Service",
+        "description": "Handles authentication",
+        "lead": None,
+        "space": "proj1",
+        "createdBy": "",
+        "createdOn": 0,
+        "modifiedBy": "",
+        "modifiedOn": 0,
+    }
+]
+
+
+def test_components_list():
+    # find_all called twice: once for components, once for persons
+    find_mock = AsyncMock(side_effect=[COMPONENT_DATA, []])
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["components", "list"])
+    assert result.exit_code == 0, result.output
+    assert "Auth Service" in result.output
+
+
+def test_components_list_empty():
+    find_mock = AsyncMock(side_effect=[[], []])
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["components", "list"])
+    assert result.exit_code == 0
+
+
+def test_components_list_shows_description():
+    find_mock = AsyncMock(side_effect=[COMPONENT_DATA, []])
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["components", "list"])
+    assert result.exit_code == 0, result.output
+    assert "Auth Service" in result.output
+
+
+def test_components_list_json_mode():
+    import json as json_mod
+
+    find_mock = AsyncMock(side_effect=[COMPONENT_DATA, []])
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["--json", "components", "list"])
+    assert result.exit_code == 0, result.output
+    data = json_mod.loads(result.output)
+    assert data["ok"] is True
+    assert isinstance(data["data"], list)
+    assert data["data"][0]["label"] == "Auth Service"
