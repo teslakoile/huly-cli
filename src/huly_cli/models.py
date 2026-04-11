@@ -55,7 +55,7 @@ class Issue(BaseModel):
     modified_by: str = Field("", alias="modifiedBy")
     modified_on: int = Field(0, alias="modifiedOn")
     estimation: int = 0
-    labels: int = 0
+    labels: Any = 0
     comments: int = 0
     sub_issues: int = Field(0, alias="subIssues")
     space: str = ""
@@ -139,11 +139,11 @@ class Document(BaseModel):
 
     id: str = Field(alias="_id")
     title: str = ""
-    content: str = ""  # blob ref (empty string if no content yet)
+    content: str | None = ""  # blob ref (empty string or null if no content yet)
     space: str = ""
     parent: str = Field("", alias="parent")
     attachments: int = 0
-    labels: int = 0
+    labels: Any = 0
     comments: int = 0
     rank: str = ""
     created_by: str = Field("", alias="createdBy")
@@ -234,7 +234,7 @@ class IssueTemplate(BaseModel):
     children: list[Any] = []
     comments: int = 0
     attachments: int = 0
-    labels: int = 0
+    labels: Any = 0
     kind: str = ""
     relations: list[Any] = []
     space: str = ""

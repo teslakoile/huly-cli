@@ -179,6 +179,20 @@ async def test_get_description(fake_config, fake_auth):
     assert parsed["type"] == "doc"
 
 
+async def test_create_description(fake_config, fake_auth):
+    doc_id = urllib.parse.quote("uuid-test-456|tracker:class:Issue|issue1|description", safe="")
+    with respx.mock:
+        route = respx.post(f"https://test.example.com/_collaborator/rpc/{doc_id}").respond(
+            json={"content": {"description": "blob-ref-456"}}
+        )
+        async with HulyClient(fake_config, fake_auth) as client:
+            result = await client.create_description("issue1", '{"type":"doc","content":[]}')
+    assert result == "blob-ref-456"
+    body = json.loads(route.calls[0].request.content)
+    assert body["method"] == "createContent"
+    assert "description" in body["payload"]["content"]
+
+
 async def test_set_description(fake_config, fake_auth):
     doc_id = urllib.parse.quote("uuid-test-456|tracker:class:Issue|issue1|description", safe="")
     with respx.mock:
