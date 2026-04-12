@@ -31,6 +31,17 @@ Upgrade an existing PyPI install:
 pip install --upgrade huly-cli
 ```
 
+If `huly` is not found after installing, the install directory is likely not on
+`PATH`. The most common fix:
+
+```bash
+# macOS / Linux — add to shell profile (~/.zshrc, ~/.bashrc):
+export PATH="$HOME/.local/bin:$PATH"
+
+# Or use pipx which handles PATH automatically:
+pipx install huly-cli
+```
+
 ### Source checkout
 
 Use when the user is working in this repository:

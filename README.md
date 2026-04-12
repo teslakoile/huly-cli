@@ -48,7 +48,7 @@ If you run `huly issues list --project MY-WS`, it will fail because `MY-WS` is n
 ## Prerequisites
 
 - Python `3.11+`
-- [`uv`](https://docs.astral.sh/uv/)
+- [`uv`](https://docs.astral.sh/uv/) (only needed for source-checkout development)
 - A Huly account with access to the target workspace
 
 ## Install
@@ -69,6 +69,23 @@ pip install --upgrade huly-cli
 ```
 
 The package name is `huly-cli`. The executable is `huly`.
+
+If `huly` is not found after installing, the install directory may not be on your
+`PATH`. Common fixes:
+
+```bash
+# Check where pip installed it
+python -m site --user-base
+# Typical paths to add:
+#   macOS/Linux: ~/.local/bin
+#   Windows:     %APPDATA%\Python\PythonXY\Scripts
+
+# macOS / Linux — add to your shell profile (~/.zshrc, ~/.bashrc, etc.):
+export PATH="$HOME/.local/bin:$PATH"
+
+# Or install with pipx, which handles PATH automatically:
+pipx install huly-cli
+```
 
 ### Option 2: Use from a source checkout
 
@@ -122,7 +139,7 @@ The token cache is reused automatically. If the cached token expires, the CLI ne
 
 ## Login Walkthrough
 
-If you installed from PyPI, replace `uv run huly` below with `huly`.
+> **Source checkout?** Replace `huly` below with `uv run huly`.
 
 ### Option 1: Interactive login
 
@@ -130,7 +147,7 @@ This is the simplest flow if you are testing locally and do not want to keep you
 in `.env`.
 
 ```bash
-uv run huly --url https://huly.example.com --workspace my-ws auth login
+huly --url https://huly.example.com --workspace my-ws auth login
 ```
 
 You will be prompted for:
@@ -142,7 +159,7 @@ You will be prompted for:
 Then confirm auth is valid:
 
 ```bash
-uv run huly auth status
+huly auth status
 ```
 
 ### Option 2: Login using `.env`
@@ -159,8 +176,8 @@ HULY_PASSWORD=your-password
 Then run:
 
 ```bash
-uv run huly auth login
-uv run huly auth status
+huly auth login
+huly auth status
 ```
 
 ## Agent Skill
@@ -188,96 +205,86 @@ cp -R skills/huly-cli "${CODEX_HOME:-$HOME/.codex}/skills/"
 
 ## Hands-On Smoke Test
 
-These commands are the safest live checks to run today.
-
-If you want the repo to drive the same smoke pass for you:
-
-```bash
-uv run python scripts/live_smoke.py
-```
-
-To include live CRUD checks with automatic cleanup:
-
-```bash
-uv run python scripts/live_smoke.py --allow-writes
-```
+> **Source checkout?** Replace `huly` below with `uv run huly`.
+> The repo also has an automated smoke runner: `uv run python scripts/live_smoke.py`
+> (add `--allow-writes` for CRUD checks with automatic cleanup).
 
 1. Confirm auth:
 
 ```bash
-uv run huly auth status
+huly auth status
 ```
 
 2. List projects:
 
 ```bash
-uv run huly projects list
+huly projects list
 ```
 
-3. Inspect the verified sample project:
+3. Inspect a project:
 
 ```bash
-uv run huly projects get DEMO
+huly projects get DEMO
 ```
 
 4. List a few issues from that project:
 
 ```bash
-uv run huly issues list --project DEMO --limit 5
+huly issues list --project DEMO --limit 5
 ```
 
 5. Inspect one issue:
 
 ```bash
-uv run huly issues get DEMO-1
+huly issues get DEMO-1
 ```
 
 6. Read the issue description:
 
 ```bash
-uv run huly issues describe DEMO-1
+huly issues describe DEMO-1
 ```
 
 7. List project components:
 
 ```bash
-uv run huly components list --project DEMO --limit 5
+huly components list --project DEMO --limit 5
 ```
 
 8. Inspect a component by internal ID:
 
 ```bash
-uv run huly components get COMPONENT_ID
+huly components get COMPONENT_ID
 ```
 
 9. List a few documents:
 
 ```bash
-uv run huly documents list --limit 5
+huly documents list --limit 5
 ```
 
 10. List issue templates:
 
 ```bash
-uv run huly templates list --limit 5
+huly templates list --limit 5
 ```
 
 11. Verify status filtering:
 
 ```bash
-uv run huly issues list --status backlog --limit 5
+huly issues list --status backlog --limit 5
 ```
 
 12. List workspace members:
 
 ```bash
-uv run huly members list
+huly members list
 ```
 
 13. List labels:
 
 ```bash
-uv run huly labels list
+huly labels list
 ```
 
 ### JSON mode
@@ -285,9 +292,9 @@ uv run huly labels list
 If you want machine-readable output for quick inspection:
 
 ```bash
-uv run huly --json projects list
-uv run huly --json issues list --project DEMO --limit 5
-uv run huly --json auth status
+huly --json projects list
+huly --json issues list --project DEMO --limit 5
+huly --json auth status
 ```
 
 ## Commands That Currently Need Caution
@@ -329,13 +336,13 @@ For the maintainer release checklist and publisher configuration notes, see
 Top-level help:
 
 ```bash
-uv run huly --help
+huly --help
 ```
 
 Auth help:
 
 ```bash
-uv run huly auth login --help
+huly auth login --help
 ```
 
 ## License

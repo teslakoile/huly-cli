@@ -44,6 +44,16 @@ pip install huly-cli
 huly --help
 ```
 
+If `huly` is not found after installing, the install directory may not be on
+`PATH`. Suggest:
+
+```bash
+# Add pip's user bin to PATH (macOS / Linux):
+export PATH="$HOME/.local/bin:$PATH"
+# Or use pipx which handles PATH automatically:
+pipx install huly-cli
+```
+
 If the user is working inside this repository or needs the unreleased source
 version, prefer the repo-local flow:
 
