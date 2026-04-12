@@ -66,7 +66,7 @@ def templates_list(
     ctx: typer.Context,
     project: Annotated[
         str | None,
-        typer.Option("--project", "-p", help="Filter by project identifier (e.g. ROA)."),
+        typer.Option("--project", "-p", help="Filter by project identifier (e.g. DEMO)."),
     ] = None,
     limit: Annotated[
         int,

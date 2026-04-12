@@ -19,7 +19,7 @@ def _raw_issue(**overrides: object) -> dict[str, object]:
     issue: dict[str, object] = {
         "_id": "issue-1",
         "title": "Existing issue",
-        "identifier": "ROA-1",
+        "identifier": "DEMO-1",
         "number": 1,
         "status": "tracker:status:Backlog",
         "priority": 2,
@@ -56,8 +56,8 @@ async def test_find_issue_by_identifier_or_id_falls_back_to_internal_id():
 async def test_create_impl_increments_project_sequence_and_uses_blob_ref(fake_config, fake_auth):
     project_doc = {
         "_id": "project-1",
-        "name": "Roadmap",
-        "identifier": "ROA",
+        "name": "My Project",
+        "identifier": "DEMO",
         "sequence": 16,
         "members": [],
         "owners": [],
@@ -84,7 +84,7 @@ async def test_create_impl_increments_project_sequence_and_uses_blob_ref(fake_co
         message = await issues_cmd._create_impl(
             fake_config,
             title="Fix auth drift",
-            project="ROA",
+            project="DEMO",
             status=None,
             priority="high",
             assignee=None,
@@ -103,7 +103,7 @@ async def test_create_impl_increments_project_sequence_and_uses_blob_ref(fake_co
     assert create_tx["objectClass"] == "tracker:class:Issue"
     assert create_tx["objectSpace"] == "project-1"
     assert create_tx["attributes"]["number"] == 17
-    assert create_tx["attributes"]["identifier"] == "ROA-17"
+    assert create_tx["attributes"]["identifier"] == "DEMO-17"
     assert create_tx["attributes"]["rank"] == "0|i0002g:"
     assert create_tx["attributes"]["description"] is None
     assert create_tx["attributes"]["status"] == "tracker:status:Backlog"
@@ -111,7 +111,7 @@ async def test_create_impl_increments_project_sequence_and_uses_blob_ref(fake_co
     assert description_tx["objectClass"] == "tracker:class:Issue"
     assert description_tx["objectId"] == create_tx["objectId"]
     assert description_tx["operations"] == {"description": "blob-description-1"}
-    assert "ROA-17" in message
+    assert "DEMO-17" in message
     create_description_mock.assert_awaited_once()
 
 
@@ -133,7 +133,7 @@ async def test_update_impl_resolves_custom_status_and_unassigns(fake_config, fak
     ):
         await issues_cmd._update_impl(
             fake_config,
-            identifier="ROA-1",
+            identifier="DEMO-1",
             title="Updated title",
             status="UAT",
             priority="high",
@@ -165,10 +165,10 @@ def test_issues_describe_set_creates_blob_ref_when_missing(fake_auth):
         patch("huly_cli.client.HulyClient.create_description", create_description_mock),
         patch("huly_cli.client.HulyClient.tx", tx_mock),
     ):
-        result = runner.invoke(app, ["issues", "describe", "ROA-1", "--set", "hello world"])
+        result = runner.invoke(app, ["issues", "describe", "DEMO-1", "--set", "hello world"])
 
     assert result.exit_code == 0, result.output
-    assert "Description updated for ROA-1." in result.output
+    assert "Description updated for DEMO-1." in result.output
     assert tx_mock.await_args.args[0]["operations"] == {"description": "blob-description-2"}
 
 
@@ -185,10 +185,10 @@ def test_issues_describe_set_falls_back_to_inline_markup_when_blob_create_fails(
         patch("huly_cli.client.HulyClient.create_description", create_description_mock),
         patch("huly_cli.client.HulyClient.tx", tx_mock),
     ):
-        result = runner.invoke(app, ["issues", "describe", "ROA-1", "--set", "hello world"])
+        result = runner.invoke(app, ["issues", "describe", "DEMO-1", "--set", "hello world"])
 
     assert result.exit_code == 0, result.output
-    assert "Description updated for ROA-1." in result.output
+    assert "Description updated for DEMO-1." in result.output
     description_value = tx_mock.await_args.args[0]["operations"]["description"]
     assert isinstance(description_value, str)
     assert description_value.startswith("{")
@@ -284,7 +284,7 @@ def test_issues_describe_reads_inline_markup_without_collaborator(fake_auth):
             new=AsyncMock(return_value=[_raw_issue(description=inline_markup)]),
         ),
     ):
-        result = runner.invoke(app, ["--json", "issues", "describe", "ROA-1"])
+        result = runner.invoke(app, ["--json", "issues", "describe", "DEMO-1"])
 
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
@@ -340,10 +340,10 @@ def test_issues_delete_removes_issue(fake_auth):
         ),
         patch("huly_cli.client.HulyClient.tx", tx_mock),
     ):
-        result = runner.invoke(app, ["issues", "delete", "ROA-1"])
+        result = runner.invoke(app, ["issues", "delete", "DEMO-1"])
 
     assert result.exit_code == 0, result.output
-    assert "Issue ROA-1 deleted." in result.output
+    assert "Issue DEMO-1 deleted." in result.output
     assert tx_mock.await_args.args[0] == {
         "_class": "core:class:TxRemoveDoc",
         "objectClass": "tracker:class:Issue",
@@ -415,7 +415,7 @@ def test_issues_get_formats_workspace_specific_status(fake_auth):
         ),
         patch("huly_cli.commands.issues.print_item", side_effect=capture),
     ):
-        result = runner.invoke(app, ["issues", "get", "ROA-1"])
+        result = runner.invoke(app, ["issues", "get", "DEMO-1"])
 
     assert result.exit_code == 0, result.output
     assert captured["data"]["status"] == "uat"
@@ -426,8 +426,8 @@ def test_issues_list_fans_out_multi_status_queries(fake_auth):
     captured: dict[str, object] = {}
     find_all_mock = AsyncMock(
         side_effect=[
-            [_raw_issue(_id="issue-1", identifier="ROA-1", status="status-1")],
-            [_raw_issue(_id="issue-2", identifier="ROA-2", status="status-2")],
+            [_raw_issue(_id="issue-1", identifier="DEMO-1", status="status-1")],
+            [_raw_issue(_id="issue-2", identifier="DEMO-2", status="status-2")],
             [],
         ]
     )
@@ -459,5 +459,5 @@ def test_issues_list_fans_out_multi_status_queries(fake_auth):
     assert result.exit_code == 0, result.output
     assert find_all_mock.await_args_list[0].kwargs["query"] == {"status": "status-1"}
     assert find_all_mock.await_args_list[1].kwargs["query"] == {"status": "status-2"}
-    assert [item["identifier"] for item in captured["items"]] == ["ROA-1", "ROA-2"]
+    assert [item["identifier"] for item in captured["items"]] == ["DEMO-1", "DEMO-2"]
     assert [item["status"] for item in captured["items"]] == ["ready", "ready"]

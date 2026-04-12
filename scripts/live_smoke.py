@@ -264,10 +264,10 @@ def cleanup_writes(artifacts: CreatedArtifacts) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--project", default="ROA", help="Project identifier for smoke tests.")
+    parser.add_argument("--project", default="DEMO", help="Project identifier for smoke tests.")
     parser.add_argument(
         "--teamspace",
-        default="RoA - Staff Augmentation",
+        default="Engineering",
         help="Teamspace name used for document write checks.",
     )
     parser.add_argument(

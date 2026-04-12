@@ -90,7 +90,7 @@ def milestones_list(
     ctx: typer.Context,
     project: Annotated[
         str | None,
-        typer.Option("--project", "-p", help="Filter by project identifier (e.g. ROA)."),
+        typer.Option("--project", "-p", help="Filter by project identifier (e.g. DEMO)."),
     ] = None,
     status: Annotated[
         str | None,
@@ -187,7 +187,7 @@ def milestones_create(
     ctx: typer.Context,
     label: Annotated[str, typer.Option("--label", help="Milestone label.")] = ...,
     project: Annotated[
-        str, typer.Option("--project", help='Project identifier (e.g. "ROA").')
+        str, typer.Option("--project", help='Project identifier (e.g. "DEMO").')
     ] = ...,
     status: Annotated[
         str, typer.Option("--status", help="Status: planned, in-progress, completed.")

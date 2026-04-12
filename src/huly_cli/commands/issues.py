@@ -219,7 +219,7 @@ def issues_list(
     ctx: typer.Context,
     project: Annotated[
         str | None,
-        typer.Option("--project", "-p", help="Filter by project identifier (e.g. ROA)."),
+        typer.Option("--project", "-p", help="Filter by project identifier (e.g. DEMO)."),
     ] = None,
     status: Annotated[
         str | None,
@@ -328,7 +328,7 @@ def issues_list(
 @app.command("get")
 def issues_get(
     ctx: typer.Context,
-    identifier: str = typer.Argument(..., help="Issue identifier (e.g. ROA-1)."),
+    identifier: str = typer.Argument(..., help="Issue identifier (e.g. DEMO-1)."),
 ) -> None:
     """Get details of an issue."""
     overrides: dict = ctx.obj or {}
@@ -367,7 +367,7 @@ def issues_create(
     ctx: typer.Context,
     title: Annotated[str, typer.Option("--title", help="Issue title.")] = ...,
     project: Annotated[
-        str, typer.Option("--project", help='Project identifier (e.g. "ROA").')
+        str, typer.Option("--project", help='Project identifier (e.g. "DEMO").')
     ] = ...,
     status: Annotated[str | None, typer.Option("--status", help="Status name or id.")] = None,
     priority: Annotated[str, typer.Option("--priority", help="Priority name or number.")] = "none",
@@ -474,7 +474,7 @@ async def _create_impl(
 @app.command("update")
 def issues_update(
     ctx: typer.Context,
-    identifier: str = typer.Argument(..., help="Issue identifier (e.g. ROA-1)."),
+    identifier: str = typer.Argument(..., help="Issue identifier (e.g. DEMO-1)."),
     title: Annotated[str | None, typer.Option("--title", help="New issue title.")] = None,
     status: Annotated[str | None, typer.Option("--status", help="New status name.")] = None,
     priority: Annotated[
@@ -553,7 +553,7 @@ async def _update_impl(
 @app.command("describe")
 def issues_describe(
     ctx: typer.Context,
-    identifier: str = typer.Argument(..., help="Issue identifier (e.g. ROA-1)."),
+    identifier: str = typer.Argument(..., help="Issue identifier (e.g. DEMO-1)."),
     raw: Annotated[
         bool,
         typer.Option("--raw", help="Show raw ProseMirror JSON instead of rendered markdown."),
@@ -704,7 +704,7 @@ def issues_describe(
 @app.command("delete")
 def issues_delete(
     ctx: typer.Context,
-    identifier: str = typer.Argument(..., help="Issue identifier (e.g. ROA-1)."),
+    identifier: str = typer.Argument(..., help="Issue identifier (e.g. DEMO-1)."),
 ) -> None:
     """Delete an existing issue."""
     overrides: dict = ctx.obj or {}

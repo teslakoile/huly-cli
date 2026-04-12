@@ -89,7 +89,7 @@ uv run huly auth status
 Important distinction:
 
 - workspace slug and project identifier are not the same thing
-- example from this repo: workspace `efs`, project `ROA`
+- example: workspace `my-ws`, project `DEMO`
 
 ### 3. Validate the installation
 

@@ -29,7 +29,7 @@ class HulyConfig:
 class AuthCache:
     account_token: str
     workspace_token: str
-    workspace_id: str  # e.g. "w-athena-efs-69cb28b3-..."
+    workspace_id: str  # e.g. "w-example-abc12345-..."
     workspace_uuid: str  # e.g. "46573ece-3150-4b3a-..."
     email: str
     workspace_slug: str
@@ -56,7 +56,7 @@ def load_config(
     toml = _load_toml_config()
 
     url = (
-        url_override or os.environ.get("HULY_URL") or toml.get("url") or "https://huly.ingenuity.ph"
+        url_override or os.environ.get("HULY_URL") or toml.get("url") or "https://huly.example.com"
     )
     workspace = (
         workspace_override or os.environ.get("HULY_WORKSPACE") or toml.get("workspace") or ""

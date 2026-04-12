@@ -43,7 +43,7 @@ class Issue(BaseModel):
     id: str = Field(alias="_id")
     title: str
     description: str = ""  # blob ref (not inline text)
-    identifier: str = ""  # "ROA-1"
+    identifier: str = ""  # "DEMO-1"
     number: int = 0
     status: str = ""
     priority: int = 0

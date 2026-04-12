@@ -67,7 +67,7 @@ def projects_list(ctx: typer.Context) -> None:
 @app.command("get")
 def projects_get(
     ctx: typer.Context,
-    identifier: str = typer.Argument(..., help="Project identifier (e.g. ROA) or internal ID."),
+    identifier: str = typer.Argument(..., help="Project identifier (e.g. DEMO) or internal ID."),
 ) -> None:
     """Get details of a project."""
     overrides: dict = ctx.obj or {}

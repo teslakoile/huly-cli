@@ -7,13 +7,13 @@ Python CLI for interacting with a Huly workspace from the terminal.
 This repo is currently a Python `typer` CLI, not a Node or `pnpm` project.
 
 It has been checked against `hcengineering/platform@v0.6.504` and smoke-tested against
-`https://huly.ingenuity.ph` workspace `efs`.
+`https://huly.example.com` workspace `my-ws`.
 
 What is verified today:
 
 - Authentication flow via `/_accounts`
 - Read access for projects, issues, components, documents, templates, members, labels, and issue descriptions
-- Live CRUD for issues, documents, components, and milestones on `https://huly.ingenuity.ph` workspace `efs`
+- Live CRUD for issues, documents, components, and milestones on `https://huly.example.com` workspace `my-ws`
 - Live template description update and restore flow
 - Workspace-specific issue status display and status filtering
 - Local unit/CLI test suite
@@ -36,14 +36,14 @@ Known live compatibility gaps at the time of writing:
 
 - Huly platform tag: `v0.6.504`
 - Example workspace URL used during verification:
-  `https://huly.ingenuity.ph/workbench/efs/tracker/69cb986a2df46a01935af670/issues`
+  `https://huly.example.com/workbench/my-ws/tracker/PROJECT_ID/issues`
 
 Important distinction:
 
-- `efs` is the workspace slug
-- `ROA` is the project identifier in that workspace
+- `my-ws` is the workspace slug
+- `DEMO` is the project identifier in that workspace
 
-If you run `huly issues list --project EFS`, it will fail because `EFS` is not a project ID.
+If you run `huly issues list --project MY-WS`, it will fail because `MY-WS` is not a project ID.
 
 ## Prerequisites
 
@@ -130,7 +130,7 @@ This is the simplest flow if you are testing locally and do not want to keep you
 in `.env`.
 
 ```bash
-uv run huly --url https://huly.ingenuity.ph --workspace efs auth login
+uv run huly --url https://huly.example.com --workspace my-ws auth login
 ```
 
 You will be prompted for:
@@ -150,8 +150,8 @@ uv run huly auth status
 Put all four values in `.env`:
 
 ```bash
-HULY_URL=https://huly.ingenuity.ph
-HULY_WORKSPACE=efs
+HULY_URL=https://huly.example.com
+HULY_WORKSPACE=my-ws
 HULY_EMAIL=you@example.com
 HULY_PASSWORD=your-password
 ```
@@ -217,37 +217,37 @@ uv run huly projects list
 3. Inspect the verified sample project:
 
 ```bash
-uv run huly projects get ROA
+uv run huly projects get DEMO
 ```
 
 4. List a few issues from that project:
 
 ```bash
-uv run huly issues list --project ROA --limit 5
+uv run huly issues list --project DEMO --limit 5
 ```
 
 5. Inspect one issue:
 
 ```bash
-uv run huly issues get ROA-1
+uv run huly issues get DEMO-1
 ```
 
 6. Read the issue description:
 
 ```bash
-uv run huly issues describe ROA-1
+uv run huly issues describe DEMO-1
 ```
 
 7. List project components:
 
 ```bash
-uv run huly components list --project ROA --limit 5
+uv run huly components list --project DEMO --limit 5
 ```
 
 8. Inspect a component by internal ID:
 
 ```bash
-uv run huly components get 16e202fa79377835295c79eb
+uv run huly components get COMPONENT_ID
 ```
 
 9. List a few documents:
@@ -286,7 +286,7 @@ If you want machine-readable output for quick inspection:
 
 ```bash
 uv run huly --json projects list
-uv run huly --json issues list --project ROA --limit 5
+uv run huly --json issues list --project DEMO --limit 5
 uv run huly --json auth status
 ```
 
