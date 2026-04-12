@@ -157,7 +157,9 @@ def write_checks(project: str, teamspace: str, artifacts: CreatedArtifacts) -> N
         "--status",
         "done",
     )
-    run_json("issues", "describe", issue_identifier, "--set", "Updated live smoke issue description.")
+    run_json(
+        "issues", "describe", issue_identifier, "--set", "Updated live smoke issue description."
+    )
 
     document_create = run_json(
         "documents",
@@ -170,7 +172,9 @@ def write_checks(project: str, teamspace: str, artifacts: CreatedArtifacts) -> N
     _, document_id = parse_created_ids(document_create["message"])
     require(document_id is not None, "failed to parse created document id")
     artifacts.document_id = document_id
-    run_json("documents", "update", document_id, "--title", f"CODEX Smoke Document {suffix} updated")
+    run_json(
+        "documents", "update", document_id, "--title", f"CODEX Smoke Document {suffix} updated"
+    )
     run_json("documents", "describe", document_id, "--set", "Updated live smoke document content.")
     document_desc = run_json("documents", "describe", document_id)
     require(

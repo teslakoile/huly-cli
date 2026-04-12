@@ -274,7 +274,9 @@ def test_documents_describe_set_falls_back_to_inline_markup_when_blob_create_fai
 
 
 def test_issues_describe_reads_inline_markup_without_collaborator(fake_auth):
-    inline_markup = '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"hello"}]}]}'
+    inline_markup = (
+        '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"hello"}]}]}'
+    )
     with (
         patch("huly_cli.commands.issues.ensure_auth", new=AsyncMock(return_value=fake_auth)),
         patch(
@@ -290,7 +292,9 @@ def test_issues_describe_reads_inline_markup_without_collaborator(fake_auth):
 
 
 def test_documents_describe_reads_inline_markup_without_collaborator(fake_auth):
-    inline_markup = '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"hello"}]}]}'
+    inline_markup = (
+        '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"hello"}]}]}'
+    )
 
     with (
         patch("huly_cli.commands.documents.ensure_auth", new=AsyncMock(return_value=fake_auth)),
