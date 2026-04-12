@@ -1,0 +1,4 @@
+interface:
+  display_name: "Huly CLI"
+  short_description: "Install and operate the Huly CLI"
+  default_prompt: "Use $huly-cli to detect whether the Huly CLI is installed, install it if needed, authenticate it for a workspace, and run the appropriate smoke checks."

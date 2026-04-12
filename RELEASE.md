@@ -3,29 +3,33 @@
 This repo is set up to publish `huly-cli` to PyPI using GitHub Actions Trusted
 Publishing.
 
-## What the repo now handles
+## Current release setup
 
 - Builds a wheel and sdist with `python -m build`
 - Validates package metadata with `twine check`
 - Verifies packaging in CI
 - Includes a publish workflow at
   `.github/workflows/publish-pypi.yml`
+- Publishes the `huly-cli` package to PyPI through GitHub Actions Trusted
+  Publishing
 
-## Manual steps you still need to do once
+Key identifiers for this repo:
 
-1. Decide the final PyPI project name.
+- PyPI project name: `huly-cli`
+- Repository owner: `teslakoile`
+- Repository name: `huly-cli`
+- Workflow filename: `publish-pypi.yml`
+- GitHub environment: `pypi`
 
-The current package name is `huly-cli`. Before the first release, confirm it is
-the name you want to keep and that it is available on PyPI.
+## One-time checks
 
-2. Create and secure a PyPI account.
+These are not normal per-release tasks. Revisit them only if you change the
+repository owner, repository name, workflow filename, or environment.
 
-- Create an account at `https://pypi.org/account/register/`
-- Enable 2FA on the account
+1. Confirm Trusted Publishing still points at the correct repository and
+workflow.
 
-3. Configure Trusted Publishing on PyPI.
-
-Use PyPI's GitHub Actions Trusted Publisher flow and register this repository:
+The expected publisher configuration is:
 
 - Repository owner: `teslakoile`
 - Repository name: `huly-cli`
@@ -33,18 +37,21 @@ Use PyPI's GitHub Actions Trusted Publisher flow and register this repository:
 - GitHub environment: `pypi`
 - PyPI project name: `huly-cli`
 
-For a brand new package, create a pending publisher first. PyPI will create the
-project on first successful publish.
+2. Confirm the GitHub environment still exists and has the protection rules you
+want.
+
+Use a GitHub environment named `pypi`. If you want manual approval before every
+publish, require reviewers there.
+
+3. Keep PyPI account security in good standing.
+
+- Create an account at `https://pypi.org/account/register/`
+- Enable 2FA on the account
 
 Official references:
 
 - `https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/`
 - `https://docs.pypi.org/trusted-publishers/using-a-publisher/`
-
-4. Add environment protection in GitHub.
-
-Create a GitHub environment named `pypi` and, if you want approval before every
-publish, require reviewers there.
 
 ## Manual steps for each release
 
