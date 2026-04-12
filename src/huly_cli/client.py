@@ -116,7 +116,7 @@ class HulyClient:
                 last_error = exc
 
             if attempt < _RETRY_MAX_ATTEMPTS - 1:
-                delay = _RETRY_BASE_DELAY * (2 ** attempt)
+                delay = _RETRY_BASE_DELAY * (2**attempt)
                 await asyncio.sleep(delay)
 
         # All retries exhausted — store details for caller
@@ -135,7 +135,9 @@ class HulyClient:
           - class_id="document:class:Document", field="content"
         """
         resp = await self._collaborator_rpc(
-            class_id, object_id, field,
+            class_id,
+            object_id,
+            field,
             method="getContent",
             payload={"source": blob_ref},
         )
@@ -161,7 +163,9 @@ class HulyClient:
     ) -> str | None:
         """Create entity content via Collaborator RPC and return its blob ref."""
         resp = await self._collaborator_rpc(
-            class_id, object_id, field,
+            class_id,
+            object_id,
+            field,
             method="createContent",
             payload={"content": {field: markup_json}},
         )
@@ -190,7 +194,9 @@ class HulyClient:
         Works for any entity class and field.
         """
         resp = await self._collaborator_rpc(
-            class_id, object_id, field,
+            class_id,
+            object_id,
+            field,
             method="updateContent",
             payload={"source": blob_ref, "content": {field: markup_json}},
         )
