@@ -4,9 +4,23 @@ build-backend = "hatchling.build"
 
 [project]
 name = "huly-cli"
-version = "0.1.0"
+dynamic = ["version"]
 description = "CLI for Huly project management"
+readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.11"
+keywords = ["cli", "huly", "project-management"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Utilities",
+]
 dependencies = [
     "typer>=0.15.0,<1.0",
     "httpx>=0.28.0,<1.0",
@@ -23,10 +37,20 @@ dev = [
     "respx>=0.22.0",
     "ruff>=0.8.0",
     "pre-commit>=3.5.0",
+    "build>=1.2.2",
+    "twine>=6.1.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/teslakoile/huly-cli"
+Repository = "https://github.com/teslakoile/huly-cli"
+Issues = "https://github.com/teslakoile/huly-cli/issues"
+
 [project.scripts]
-huly = "huly_cli.main:app"
+huly = "huly_cli.main:main"
+
+[tool.hatch.version]
+path = "src/huly_cli/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/huly_cli"]
