@@ -210,3 +210,92 @@ async def test_set_description(fake_config, fake_auth):
     assert body["method"] == "updateContent"
     assert body["payload"]["source"] == "blob-ref-123"
     assert body["payload"]["content"]["description"] == '{"type":"doc","content":[]}'
+
+
+# ── Collaborator RPC retry ───────────────────────────────────────────────────
+
+
+async def test_collaborator_rpc_retries_on_500(fake_config, fake_auth, monkeypatch):
+    """set_description retries on 500 and succeeds on the second attempt."""
+    import huly_cli.client as client_mod
+
+    monkeypatch.setattr(client_mod, "_RETRY_BASE_DELAY", 0.01)
+
+    doc_id = urllib.parse.quote("uuid-test-456|tracker:class:Issue|issue1|description", safe="")
+    call_count = 0
+
+    def side_effect(request, route):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return respx.MockResponse(500, text='{"error":"Failed to save document"}')
+        return respx.MockResponse(200, json={})
+
+    with respx.mock:
+        respx.post(f"https://test.example.com/_collaborator/rpc/{doc_id}").mock(
+            side_effect=side_effect
+        )
+        async with HulyClient(fake_config, fake_auth) as client:
+            ok = await client.set_description("issue1", "blob-ref-123", '{"type":"doc"}')
+    assert ok is True
+    assert call_count == 2
+
+
+async def test_collaborator_rpc_fails_after_max_retries(fake_config, fake_auth, monkeypatch):
+    """set_description returns False after exhausting all retries on 500."""
+    import huly_cli.client as client_mod
+
+    monkeypatch.setattr(client_mod, "_RETRY_BASE_DELAY", 0.01)
+
+    doc_id = urllib.parse.quote("uuid-test-456|tracker:class:Issue|issue1|description", safe="")
+    with respx.mock:
+        route = respx.post(f"https://test.example.com/_collaborator/rpc/{doc_id}").respond(
+            500, text='{"error":"Failed to save document"}'
+        )
+        async with HulyClient(fake_config, fake_auth) as client:
+            ok = await client.set_description("issue1", "blob-ref-123", '{"type":"doc"}')
+    assert ok is False
+    assert len(route.calls) == 3  # 3 attempts total
+
+
+async def test_collaborator_rpc_no_retry_on_4xx(fake_config, fake_auth, monkeypatch):
+    """Non-5xx errors (e.g. 400) are not retried."""
+    import huly_cli.client as client_mod
+
+    monkeypatch.setattr(client_mod, "_RETRY_BASE_DELAY", 0.01)
+
+    doc_id = urllib.parse.quote("uuid-test-456|tracker:class:Issue|issue1|description", safe="")
+    with respx.mock:
+        route = respx.post(f"https://test.example.com/_collaborator/rpc/{doc_id}").respond(
+            400, text="Bad Request"
+        )
+        async with HulyClient(fake_config, fake_auth) as client:
+            ok = await client.set_description("issue1", "blob-ref-123", '{"type":"doc"}')
+    assert ok is False
+    assert len(route.calls) == 1  # no retry
+
+
+async def test_collaborator_rpc_retries_create_content(fake_config, fake_auth, monkeypatch):
+    """create_description also retries on 500."""
+    import huly_cli.client as client_mod
+
+    monkeypatch.setattr(client_mod, "_RETRY_BASE_DELAY", 0.01)
+
+    doc_id = urllib.parse.quote("uuid-test-456|tracker:class:Issue|issue1|description", safe="")
+    call_count = 0
+
+    def side_effect(request, route):
+        nonlocal call_count
+        call_count += 1
+        if call_count <= 2:
+            return respx.MockResponse(500, text="error")
+        return respx.MockResponse(200, json={"content": {"description": "blob-new"}})
+
+    with respx.mock:
+        respx.post(f"https://test.example.com/_collaborator/rpc/{doc_id}").mock(
+            side_effect=side_effect
+        )
+        async with HulyClient(fake_config, fake_auth) as client:
+            ref = await client.create_description("issue1", '{"type":"doc"}')
+    assert ref == "blob-new"
+    assert call_count == 3

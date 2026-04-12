@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json as json_mod
 import time
 import urllib.parse
@@ -12,6 +13,10 @@ import httpx
 from huly_cli.config import AuthCache, HulyConfig
 from huly_cli.errors import AuthError, RateLimitError, ServerError
 from huly_cli.output import print_warning
+
+# Retry settings for Collaborator RPC (server 500s)
+_RETRY_MAX_ATTEMPTS = 3
+_RETRY_BASE_DELAY = 1.0  # seconds; doubles each attempt
 
 
 class HulyClient:
@@ -71,6 +76,55 @@ class HulyClient:
 
     # ── Collaborator RPC ──────────────────────────────────────────────────────
 
+    async def _collaborator_rpc(
+        self,
+        class_id: str,
+        object_id: str,
+        field: str,
+        method: str,
+        payload: dict[str, Any],
+    ) -> httpx.Response | None:
+        """Send a Collaborator RPC request with automatic retry on 5xx errors.
+
+        Returns the successful httpx.Response, or None after all retries are
+        exhausted.
+        """
+        doc_id = self._build_doc_id(class_id, object_id, field)
+        url = f"{self._config.url}/_collaborator/rpc/{doc_id}"
+        headers = {
+            "Authorization": f"Bearer {self._auth.workspace_token}",
+            "Content-Type": "application/json",
+        }
+        body = {"method": method, "payload": payload}
+
+        last_error: Exception | None = None
+        last_status: int | None = None
+        last_body: str = ""
+
+        for attempt in range(_RETRY_MAX_ATTEMPTS):
+            try:
+                async with httpx.AsyncClient(timeout=15.0) as http:
+                    resp = await http.post(url, headers=headers, json=body)
+                if resp.status_code == 200:
+                    return resp
+                last_status = resp.status_code
+                last_body = resp.text[:200]
+                # Only retry on server errors (5xx)
+                if resp.status_code < 500:
+                    break
+            except (httpx.TimeoutException, httpx.ConnectError) as exc:
+                last_error = exc
+
+            if attempt < _RETRY_MAX_ATTEMPTS - 1:
+                delay = _RETRY_BASE_DELAY * (2 ** attempt)
+                await asyncio.sleep(delay)
+
+        # All retries exhausted — store details for caller
+        self._last_rpc_status = last_status
+        self._last_rpc_body = last_body
+        self._last_rpc_error = last_error
+        return None
+
     async def get_content(
         self, class_id: str, object_id: str, field: str, blob_ref: str
     ) -> str | None:
@@ -80,31 +134,21 @@ class HulyClient:
           - class_id="tracker:class:Issue", field="description"
           - class_id="document:class:Document", field="content"
         """
-        doc_id = self._build_doc_id(class_id, object_id, field)
-        url = f"{self._config.url}/_collaborator/rpc/{doc_id}"
-        try:
-            async with httpx.AsyncClient(timeout=15.0) as http:
-                resp = await http.post(
-                    url,
-                    headers={
-                        "Authorization": f"Bearer {self._auth.workspace_token}",
-                        "Content-Type": "application/json",
-                    },
-                    json={"method": "getContent", "payload": {"source": blob_ref}},
-                )
-                if resp.status_code != 200:
-                    print_warning(f"getContent returned HTTP {resp.status_code}: {resp.text[:200]}")
-                    return None
-                data = resp.json()
-                content = data.get("content", {}).get(field)
-                if content is None:
-                    return None
-                if isinstance(content, (dict, list)):
-                    return json_mod.dumps(content)
-                return str(content)
-        except Exception as e:
-            print_warning(f"getContent error: {e}")
+        resp = await self._collaborator_rpc(
+            class_id, object_id, field,
+            method="getContent",
+            payload={"source": blob_ref},
+        )
+        if resp is None:
+            self._warn_rpc_failure("getContent")
             return None
+        data = resp.json()
+        content = data.get("content", {}).get(field)
+        if content is None:
+            return None
+        if isinstance(content, (dict, list)):
+            return json_mod.dumps(content)
+        return str(content)
 
     async def create_content(
         self,
@@ -116,38 +160,20 @@ class HulyClient:
         warn_on_error: bool = True,
     ) -> str | None:
         """Create entity content via Collaborator RPC and return its blob ref."""
-        doc_id = self._build_doc_id(class_id, object_id, field)
-        url = f"{self._config.url}/_collaborator/rpc/{doc_id}"
-        try:
-            async with httpx.AsyncClient(timeout=15.0) as http:
-                resp = await http.post(
-                    url,
-                    headers={
-                        "Authorization": f"Bearer {self._auth.workspace_token}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "method": "createContent",
-                        "payload": {
-                            "content": {field: markup_json},
-                        },
-                    },
-                )
-                if resp.status_code != 200:
-                    if warn_on_error:
-                        print_warning(
-                            f"createContent failed (HTTP {resp.status_code}): {resp.text[:200]}"
-                        )
-                    return None
-                data = resp.json()
-                blob_ref = data.get("content", {}).get(field)
-                if blob_ref is None:
-                    return None
-                return str(blob_ref)
-        except Exception as e:
+        resp = await self._collaborator_rpc(
+            class_id, object_id, field,
+            method="createContent",
+            payload={"content": {field: markup_json}},
+        )
+        if resp is None:
             if warn_on_error:
-                print_warning(f"createContent error: {e}")
+                self._warn_rpc_failure("createContent")
             return None
+        data = resp.json()
+        blob_ref = data.get("content", {}).get(field)
+        if blob_ref is None:
+            return None
+        return str(blob_ref)
 
     async def set_content(
         self,
@@ -163,35 +189,28 @@ class HulyClient:
 
         Works for any entity class and field.
         """
-        doc_id = self._build_doc_id(class_id, object_id, field)
-        url = f"{self._config.url}/_collaborator/rpc/{doc_id}"
-        try:
-            async with httpx.AsyncClient(timeout=15.0) as http:
-                resp = await http.post(
-                    url,
-                    headers={
-                        "Authorization": f"Bearer {self._auth.workspace_token}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "method": "updateContent",
-                        "payload": {
-                            "source": blob_ref,
-                            "content": {field: markup_json},
-                        },
-                    },
-                )
-                if resp.status_code != 200:
-                    if warn_on_error:
-                        print_warning(
-                            f"updateContent failed (HTTP {resp.status_code}): {resp.text[:200]}"
-                        )
-                    return False
-                return True
-        except Exception as e:
+        resp = await self._collaborator_rpc(
+            class_id, object_id, field,
+            method="updateContent",
+            payload={"source": blob_ref, "content": {field: markup_json}},
+        )
+        if resp is None:
             if warn_on_error:
-                print_warning(f"updateContent error: {e}")
+                self._warn_rpc_failure("updateContent")
             return False
+        return True
+
+    def _warn_rpc_failure(self, method: str) -> None:
+        """Emit a warning with details from the last failed RPC attempt."""
+        status = getattr(self, "_last_rpc_status", None)
+        body = getattr(self, "_last_rpc_body", "")
+        error = getattr(self, "_last_rpc_error", None)
+        if error:
+            print_warning(f"{method} error after {_RETRY_MAX_ATTEMPTS} attempts: {error}")
+        elif status:
+            print_warning(f"{method} failed (HTTP {status}): {body}")
+        else:
+            print_warning(f"{method} failed after {_RETRY_MAX_ATTEMPTS} attempts")
 
     async def get_description(self, issue_id: str, blob_ref: str) -> str | None:
         """Fetch issue description ProseMirror JSON via Collaborator RPC.
