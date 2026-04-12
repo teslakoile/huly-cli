@@ -34,3 +34,9 @@ jobs:
 
       - name: Run tests
         run: uv run pytest tests/ -v
+
+      - name: Build distributions
+        run: uv run python -m build
+
+      - name: Validate distribution metadata
+        run: uv run twine check dist/*

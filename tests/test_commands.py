@@ -410,3 +410,23 @@ def test_components_list_json_mode():
     assert data["ok"] is True
     assert isinstance(data["data"], list)
     assert data["data"][0]["label"] == "Auth Service"
+
+
+def test_components_delete_removes_component():
+    tx_mock = AsyncMock(return_value={})
+
+    with (
+        _auth_patch(),
+        patch("huly_cli.client.HulyClient.find_all", new=AsyncMock(return_value=COMPONENT_DATA)),
+        patch("huly_cli.client.HulyClient.tx", tx_mock),
+    ):
+        result = runner.invoke(app, ["components", "delete", "c1"])
+
+    assert result.exit_code == 0, result.output
+    assert "Component c1 deleted." in result.output
+    assert tx_mock.await_args.args[0] == {
+        "_class": "core:class:TxRemoveDoc",
+        "objectClass": "tracker:class:Component",
+        "objectSpace": "proj1",
+        "objectId": "c1",
+    }

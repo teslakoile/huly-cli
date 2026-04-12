@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, patch
 
 from typer.testing import CliRunner
@@ -71,7 +72,7 @@ async def test_create_impl_increments_project_sequence_and_uses_blob_ref(fake_co
             [{"_id": "issue-16", "rank": "0|i0002f:", "space": "project-1"}],
         ]
     )
-    tx_mock = AsyncMock(side_effect=[{"object": {"sequence": 17}}, {}])
+    tx_mock = AsyncMock(side_effect=[{"object": {"sequence": 17}}, {}, {}])
     create_description_mock = AsyncMock(return_value="blob-description-1")
 
     with (
@@ -92,6 +93,7 @@ async def test_create_impl_increments_project_sequence_and_uses_blob_ref(fake_co
 
     increment_tx = tx_mock.await_args_list[0].args[0]
     create_tx = tx_mock.await_args_list[1].args[0]
+    description_tx = tx_mock.await_args_list[2].args[0]
 
     assert increment_tx["objectClass"] == "tracker:class:Project"
     assert increment_tx["objectId"] == "project-1"
@@ -103,9 +105,12 @@ async def test_create_impl_increments_project_sequence_and_uses_blob_ref(fake_co
     assert create_tx["attributes"]["number"] == 17
     assert create_tx["attributes"]["identifier"] == "ROA-17"
     assert create_tx["attributes"]["rank"] == "0|i0002g:"
-    assert create_tx["attributes"]["description"] == "blob-description-1"
+    assert create_tx["attributes"]["description"] is None
     assert create_tx["attributes"]["status"] == "tracker:status:Backlog"
     assert create_tx["attributes"]["priority"] == 2
+    assert description_tx["objectClass"] == "tracker:class:Issue"
+    assert description_tx["objectId"] == create_tx["objectId"]
+    assert description_tx["operations"] == {"description": "blob-description-1"}
     assert "ROA-17" in message
     create_description_mock.assert_awaited_once()
 
@@ -165,6 +170,227 @@ def test_issues_describe_set_creates_blob_ref_when_missing(fake_auth):
     assert result.exit_code == 0, result.output
     assert "Description updated for ROA-1." in result.output
     assert tx_mock.await_args.args[0]["operations"] == {"description": "blob-description-2"}
+
+
+def test_issues_describe_set_falls_back_to_inline_markup_when_blob_create_fails(fake_auth):
+    tx_mock = AsyncMock(return_value={})
+    create_description_mock = AsyncMock(return_value=None)
+
+    with (
+        patch("huly_cli.commands.issues.ensure_auth", new=AsyncMock(return_value=fake_auth)),
+        patch(
+            "huly_cli.client.HulyClient.find_all",
+            new=AsyncMock(return_value=[_raw_issue(description=None)]),
+        ),
+        patch("huly_cli.client.HulyClient.create_description", create_description_mock),
+        patch("huly_cli.client.HulyClient.tx", tx_mock),
+    ):
+        result = runner.invoke(app, ["issues", "describe", "ROA-1", "--set", "hello world"])
+
+    assert result.exit_code == 0, result.output
+    assert "Description updated for ROA-1." in result.output
+    description_value = tx_mock.await_args.args[0]["operations"]["description"]
+    assert isinstance(description_value, str)
+    assert description_value.startswith("{")
+
+
+def test_documents_describe_set_creates_blob_ref_when_missing(fake_auth):
+    tx_mock = AsyncMock(return_value={})
+    create_content_mock = AsyncMock(return_value="blob-content-2")
+
+    with (
+        patch("huly_cli.commands.documents.ensure_auth", new=AsyncMock(return_value=fake_auth)),
+        patch(
+            "huly_cli.client.HulyClient.find_all",
+            new=AsyncMock(
+                return_value=[
+                    {
+                        "_id": "doc-1",
+                        "title": "My Doc",
+                        "content": None,
+                        "space": "space-1",
+                        "parent": "document:ids:NoParent",
+                        "attachments": 0,
+                        "labels": 0,
+                        "comments": 0,
+                        "rank": "",
+                        "createdBy": "",
+                        "createdOn": 0,
+                        "modifiedBy": "",
+                        "modifiedOn": 0,
+                    }
+                ]
+            ),
+        ),
+        patch("huly_cli.client.HulyClient.create_content", create_content_mock),
+        patch("huly_cli.client.HulyClient.tx", tx_mock),
+    ):
+        result = runner.invoke(app, ["documents", "describe", "doc-1", "--set", "hello world"])
+
+    assert result.exit_code == 0, result.output
+    assert "Content updated for 'My Doc'." in result.output
+    create_content_mock.assert_awaited_once()
+    assert tx_mock.await_args.args[0]["operations"] == {"content": "blob-content-2"}
+
+
+def test_documents_describe_set_falls_back_to_inline_markup_when_blob_create_fails(fake_auth):
+    tx_mock = AsyncMock(return_value={})
+    create_content_mock = AsyncMock(return_value=None)
+
+    with (
+        patch("huly_cli.commands.documents.ensure_auth", new=AsyncMock(return_value=fake_auth)),
+        patch(
+            "huly_cli.client.HulyClient.find_all",
+            new=AsyncMock(
+                return_value=[
+                    {
+                        "_id": "doc-1",
+                        "title": "My Doc",
+                        "content": None,
+                        "space": "space-1",
+                        "parent": "document:ids:NoParent",
+                        "attachments": 0,
+                        "labels": 0,
+                        "comments": 0,
+                        "rank": "",
+                        "createdBy": "",
+                        "createdOn": 0,
+                        "modifiedBy": "",
+                        "modifiedOn": 0,
+                    }
+                ]
+            ),
+        ),
+        patch("huly_cli.client.HulyClient.create_content", create_content_mock),
+        patch("huly_cli.client.HulyClient.tx", tx_mock),
+    ):
+        result = runner.invoke(app, ["documents", "describe", "doc-1", "--set", "hello world"])
+
+    assert result.exit_code == 0, result.output
+    assert "Content updated for 'My Doc'." in result.output
+    content_value = tx_mock.await_args.args[0]["operations"]["content"]
+    assert isinstance(content_value, str)
+    assert content_value.startswith("{")
+
+
+def test_issues_describe_reads_inline_markup_without_collaborator(fake_auth):
+    inline_markup = (
+        '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"hello"}]}]}'
+    )
+    with (
+        patch("huly_cli.commands.issues.ensure_auth", new=AsyncMock(return_value=fake_auth)),
+        patch(
+            "huly_cli.client.HulyClient.find_all",
+            new=AsyncMock(return_value=[_raw_issue(description=inline_markup)]),
+        ),
+    ):
+        result = runner.invoke(app, ["--json", "issues", "describe", "ROA-1"])
+
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data["description"] == "hello"
+
+
+def test_documents_describe_reads_inline_markup_without_collaborator(fake_auth):
+    inline_markup = (
+        '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"hello"}]}]}'
+    )
+
+    with (
+        patch("huly_cli.commands.documents.ensure_auth", new=AsyncMock(return_value=fake_auth)),
+        patch(
+            "huly_cli.client.HulyClient.find_all",
+            new=AsyncMock(
+                return_value=[
+                    {
+                        "_id": "doc-1",
+                        "title": "My Doc",
+                        "content": inline_markup,
+                        "space": "space-1",
+                        "parent": "document:ids:NoParent",
+                        "attachments": 0,
+                        "labels": 0,
+                        "comments": 0,
+                        "rank": "",
+                        "createdBy": "",
+                        "createdOn": 0,
+                        "modifiedBy": "",
+                        "modifiedOn": 0,
+                    }
+                ]
+            ),
+        ),
+    ):
+        result = runner.invoke(app, ["--json", "documents", "describe", "doc-1"])
+
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data["content"] == "hello"
+
+
+def test_issues_delete_removes_issue(fake_auth):
+    tx_mock = AsyncMock(return_value={})
+    issue = Issue.model_validate(_raw_issue(space="project-1"))
+
+    with (
+        patch("huly_cli.commands.issues.ensure_auth", new=AsyncMock(return_value=fake_auth)),
+        patch(
+            "huly_cli.commands.issues._find_issue_by_identifier_or_id",
+            new=AsyncMock(return_value=issue),
+        ),
+        patch("huly_cli.client.HulyClient.tx", tx_mock),
+    ):
+        result = runner.invoke(app, ["issues", "delete", "ROA-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "Issue ROA-1 deleted." in result.output
+    assert tx_mock.await_args.args[0] == {
+        "_class": "core:class:TxRemoveDoc",
+        "objectClass": "tracker:class:Issue",
+        "objectSpace": "project-1",
+        "objectId": "issue-1",
+    }
+
+
+def test_documents_delete_removes_document(fake_auth):
+    tx_mock = AsyncMock(return_value={})
+
+    with (
+        patch("huly_cli.commands.documents.ensure_auth", new=AsyncMock(return_value=fake_auth)),
+        patch(
+            "huly_cli.client.HulyClient.find_all",
+            new=AsyncMock(
+                return_value=[
+                    {
+                        "_id": "doc-1",
+                        "title": "My Doc",
+                        "content": "blob-ref-1",
+                        "space": "space-1",
+                        "parent": "document:ids:NoParent",
+                        "attachments": 0,
+                        "labels": 0,
+                        "comments": 0,
+                        "rank": "",
+                        "createdBy": "",
+                        "createdOn": 0,
+                        "modifiedBy": "",
+                        "modifiedOn": 0,
+                    }
+                ]
+            ),
+        ),
+        patch("huly_cli.client.HulyClient.tx", tx_mock),
+    ):
+        result = runner.invoke(app, ["documents", "delete", "doc-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "Document doc-1 deleted." in result.output
+    assert tx_mock.await_args.args[0] == {
+        "_class": "core:class:TxRemoveDoc",
+        "objectClass": "document:class:Document",
+        "objectSpace": "space-1",
+        "objectId": "doc-1",
+    }
 
 
 def test_issues_get_formats_workspace_specific_status(fake_auth):

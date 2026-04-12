@@ -12,21 +12,24 @@ It has been checked against `hcengineering/platform@v0.6.504` and smoke-tested a
 What is verified today:
 
 - Authentication flow via `/_accounts`
-- Read-only access for projects, issues, components, documents, templates, members, labels, and issue descriptions
+- Read access for projects, issues, components, documents, templates, members, labels, and issue descriptions
+- Live CRUD for issues, documents, components, and milestones on `https://huly.ingenuity.ph` workspace `efs`
+- Live template description update and restore flow
 - Workspace-specific issue status display and status filtering
 - Local unit/CLI test suite
 - CI-equivalent local checks:
-  `uv sync --extra dev`, `uv run ruff check .`, `uv run ruff format --check .`, and `uv run pytest tests/ -v`
+  `uv sync --extra dev`, `uv run ruff check .`, `uv run ruff format --check .`,
+  `uv run pytest tests/ -v`, `uv run python -m build`, and `uv run twine check dist/*`
 
 What is not fully verified yet:
 
-- Live write commands were not executed against the shared workspace
-- Issue create/update semantics are aligned to the upstream client flow, but still only verified locally with mocked tests
+- Automated live-workspace CI has not been added
+- You should still prefer a disposable project or disposable teamspace for release-time live smoke tests
 
 Known live compatibility gaps at the time of writing:
 
 - No known read-path breakage remains from the `v0.6.504` comparison and smoke tests
-- Write paths should still be exercised in a disposable project before you rely on them for production changes
+- No known CLI CRUD gap remains on the currently implemented issue, document, component, and milestone surfaces
 - The test suite now patches auth correctly; it no longer depends on a developer's local cached login state
 
 ## Compatibility Target
@@ -141,6 +144,18 @@ uv run huly auth status
 
 These commands are the safest live checks to run today.
 
+If you want the repo to drive the same smoke pass for you:
+
+```bash
+uv run python scripts/live_smoke.py
+```
+
+To include live CRUD checks with automatic cleanup:
+
+```bash
+uv run python scripts/live_smoke.py --allow-writes
+```
+
 1. Confirm auth:
 
 ```bash
@@ -231,14 +246,9 @@ uv run huly --json auth status
 
 ## Commands That Currently Need Caution
 
-Avoid treating the following as production-safe until you have exercised them in a disposable project:
-
-- `huly issues create`
-- `huly issues update`
-- `huly issues describe --set ...`
-- Any other create or update command against a real workspace
-
-If you are doing live validation, stay on read-only commands first.
+The CLI write paths were exercised live during verification, but you should still
+prefer a disposable project or disposable teamspace when doing release-time smoke
+tests against a real workspace.
 
 ## Local Test Suite
 
@@ -250,7 +260,15 @@ uv run --extra dev pytest -q
 
 Expected result at the time of verification:
 
-- `146 passed`
+- `155 passed`
+
+## Packaging And PyPI
+
+The repo now builds a wheel and sdist cleanly and CI validates the distribution
+metadata.
+
+For the full release checklist, including the manual PyPI setup you still need
+to do, see [RELEASE.md](RELEASE.md).
 
 ## CLI Help
 

@@ -57,6 +57,10 @@ def _issue_from_raw(raw: dict[str, Any]) -> Issue:
     return Issue.model_validate(_normalize_issue_doc(raw))
 
 
+def _is_inline_markup(value: str | None) -> bool:
+    return isinstance(value, str) and value.lstrip().startswith("{")
+
+
 async def _resolve_project_by_identifier(client: HulyClient, identifier: str) -> Project:
     projects = await client.find_all(
         "tracker:class:Project",
@@ -415,15 +419,6 @@ async def _create_impl(
         new_id = secrets.token_hex(12)
         number, identifier_value, rank = await _next_issue_number_and_rank(client, project_doc)
 
-        description_ref: str | None = None
-        if description:
-            from huly_cli.markup import markdown_to_prosemirror
-
-            markup = markdown_to_prosemirror(description)
-            description_ref = await client.create_description(new_id, markup)
-            if not description_ref:
-                raise HulyError("Failed to create issue description content via Collaborator RPC.")
-
         transaction = {
             "_class": "core:class:TxCreateDoc",
             "objectClass": "tracker:class:Issue",
@@ -431,7 +426,7 @@ async def _create_impl(
             "objectId": new_id,
             "attributes": {
                 "title": title,
-                "description": description_ref,
+                "description": None,
                 "status": status_id,
                 "priority": priority_int,
                 "assignee": person_id,
@@ -457,6 +452,20 @@ async def _create_impl(
         }
 
         await client.tx(transaction)
+        if description:
+            from huly_cli.markup import markdown_to_prosemirror
+
+            markup = markdown_to_prosemirror(description)
+            description_ref = await client.create_description(new_id, markup, warn_on_error=False)
+            await client.tx(
+                {
+                    "_class": "core:class:TxUpdateDoc",
+                    "objectClass": "tracker:class:Issue",
+                    "objectSpace": project_doc.id,
+                    "objectId": new_id,
+                    "operations": {"description": description_ref or markup},
+                }
+            )
         return (
             f"Issue {identifier_value} created in project {project_doc.identifier} (id: {new_id})"
         )
@@ -591,23 +600,21 @@ def issues_describe(
             async with HulyClient(config, auth) as client:
                 markup = markdown_to_prosemirror(markdown_content or "")
                 issue = await _find_issue_by_identifier_or_id(client, identifier)
-                if issue.description:
+                if issue.description and not _is_inline_markup(issue.description):
                     ok = await client.set_description(issue.id, issue.description, markup)
                     if not ok:
                         raise HulyError("Failed to update description via Collaborator RPC.")
                 else:
-                    blob_ref = await client.create_description(issue.id, markup)
-                    if not blob_ref:
-                        raise HulyError(
-                            "Failed to create description content via Collaborator RPC."
-                        )
+                    blob_ref = await client.create_description(
+                        issue.id, markup, warn_on_error=False
+                    )
                     await client.tx(
                         {
                             "_class": "core:class:TxUpdateDoc",
                             "objectClass": "tracker:class:Issue",
                             "objectSpace": issue.space,
                             "objectId": issue.id,
-                            "operations": {"description": blob_ref},
+                            "operations": {"description": blob_ref or markup},
                         }
                     )
             return issue.identifier or identifier
@@ -640,7 +647,10 @@ def issues_describe(
             issue = await _find_issue_by_identifier_or_id(client, identifier)
             if not issue.description:
                 return issue.identifier or identifier, None
-            content = await client.get_description(issue.id, issue.description)
+            if _is_inline_markup(issue.description):
+                content = issue.description
+            else:
+                content = await client.get_description(issue.id, issue.description)
         return issue.identifier or identifier, content
 
     try:
@@ -689,3 +699,42 @@ def issues_describe(
 
             plain = prosemirror_to_text(content)
             console.print(Panel(plain or "(empty description)", title=f"Description: {ident}"))
+
+
+@app.command("delete")
+def issues_delete(
+    ctx: typer.Context,
+    identifier: str = typer.Argument(..., help="Issue identifier (e.g. ROA-1)."),
+) -> None:
+    """Delete an existing issue."""
+    overrides: dict = ctx.obj or {}
+    config = load_config(
+        url_override=overrides.get("url"),
+        workspace_override=overrides.get("workspace"),
+    )
+
+    async def _run() -> None:
+        auth = await ensure_auth(config)
+        async with HulyClient(config, auth) as client:
+            issue = await _find_issue_by_identifier_or_id(client, identifier)
+            await client.tx(
+                {
+                    "_class": "core:class:TxRemoveDoc",
+                    "objectClass": "tracker:class:Issue",
+                    "objectSpace": issue.space,
+                    "objectId": issue.id,
+                }
+            )
+
+    try:
+        asyncio.run(_run())
+        print_success(f"Issue {identifier} deleted.")
+    except NotFoundError as e:
+        print_error(e.message)
+        raise typer.Exit(1) from e
+    except AuthError as e:
+        print_error(e.message, hint="Run 'huly auth login' to authenticate.")
+        raise typer.Exit(2) from e
+    except HulyError as e:
+        print_error(e.message)
+        raise typer.Exit(1) from e
