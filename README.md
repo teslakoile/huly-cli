@@ -51,7 +51,28 @@ If you run `huly issues list --project EFS`, it will fail because `EFS` is not a
 - [`uv`](https://docs.astral.sh/uv/)
 - A Huly account with access to the target workspace
 
-## Setup
+## Install
+
+### Option 1: Install from PyPI
+
+Use this if you only want the CLI and are not modifying the source:
+
+```bash
+pip install huly-cli
+huly --help
+```
+
+Upgrade an existing install:
+
+```bash
+pip install --upgrade huly-cli
+```
+
+The package name is `huly-cli`. The executable is `huly`.
+
+### Option 2: Use from a source checkout
+
+Use this if you are developing in this repository:
 
 1. Install dependencies, including dev tools:
 
@@ -101,6 +122,8 @@ The token cache is reused automatically. If the cached token expires, the CLI ne
 
 ## Login Walkthrough
 
+If you installed from PyPI, replace `uv run huly` below with `huly`.
+
 ### Option 1: Interactive login
 
 This is the simplest flow if you are testing locally and do not want to keep your password
@@ -138,6 +161,29 @@ Then run:
 ```bash
 uv run huly auth login
 uv run huly auth status
+```
+
+## Agent Skill
+
+This repo includes a Codex skill for agents that need to install or operate the
+CLI:
+
+- skill path: `skills/huly-cli`
+- explicit invocation: `$huly-cli`
+
+If you want to install that skill into a Codex skills directory outside this
+repo, copy or symlink it into `${CODEX_HOME:-$HOME/.codex}/skills`:
+
+```bash
+mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
+ln -s "$(pwd)/skills/huly-cli" "${CODEX_HOME:-$HOME/.codex}/skills/huly-cli"
+```
+
+If you prefer a copy instead of a symlink:
+
+```bash
+mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
+cp -R skills/huly-cli "${CODEX_HOME:-$HOME/.codex}/skills/"
 ```
 
 ## Hands-On Smoke Test
@@ -264,11 +310,19 @@ Expected result at the time of verification:
 
 ## Packaging And PyPI
 
-The repo now builds a wheel and sdist cleanly and CI validates the distribution
-metadata.
+The package is published on PyPI as `huly-cli`.
 
-For the full release checklist, including the manual PyPI setup you still need
-to do, see [RELEASE.md](RELEASE.md).
+Install it with:
+
+```bash
+pip install huly-cli
+```
+
+The repo also builds a wheel and sdist cleanly and CI validates the
+distribution metadata.
+
+For the maintainer release checklist and publisher configuration notes, see
+[RELEASE.md](RELEASE.md).
 
 ## CLI Help
 
