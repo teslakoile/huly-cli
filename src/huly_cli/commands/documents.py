@@ -79,6 +79,21 @@ def _doc_to_detail(doc: Document, space_map: dict[str, str]) -> dict[str, Any]:
     }
 
 
+def _is_inline_markup(value: str | None) -> bool:
+    return isinstance(value, str) and value.lstrip().startswith("{")
+
+
+async def _find_document_by_id(client: HulyClient, doc_id: str) -> Document:
+    raw = await client.find_all(
+        "document:class:Document",
+        query={"_id": doc_id},
+        options={"limit": 1},
+    )
+    if not raw:
+        raise NotFoundError(f"Document '{doc_id}' not found.")
+    return Document.model_validate(raw[0])
+
+
 # ── Commands ──────────────────────────────────────────────────────────────────
 
 
@@ -147,14 +162,7 @@ def docs_get(
     async def _run() -> dict[str, Any]:
         auth = await ensure_auth(config)
         async with HulyClient(config, auth) as client:
-            raw = await client.find_all(
-                "document:class:Document",
-                query={"_id": doc_id},
-                options={"limit": 1},
-            )
-            if not raw:
-                raise NotFoundError(f"Document '{doc_id}' not found.")
-            doc = Document.model_validate(raw[0])
+            doc = await _find_document_by_id(client, doc_id)
             space_map = await _fetch_teamspace_map(client)
         return _doc_to_detail(doc, space_map)
 
@@ -248,14 +256,7 @@ def docs_update(
     async def _run() -> None:
         auth = await ensure_auth(config)
         async with HulyClient(config, auth) as client:
-            raw = await client.find_all(
-                "document:class:Document",
-                query={"_id": doc_id},
-                options={"limit": 1},
-            )
-            if not raw:
-                raise NotFoundError(f"Document '{doc_id}' not found.")
-            doc = Document.model_validate(raw[0])
+            doc = await _find_document_by_id(client, doc_id)
 
             operations: dict = {}
             if title is not None:
@@ -339,25 +340,33 @@ def docs_describe(
 
             auth = await ensure_auth(config)
             async with HulyClient(config, auth) as client:
-                raw_docs = await client.find_all(
-                    "document:class:Document",
-                    query={"_id": doc_id},
-                    options={"limit": 1},
-                )
-                if not raw_docs:
-                    raise NotFoundError(f"Document '{doc_id}' not found.")
-                doc = Document.model_validate(raw_docs[0])
-                if not doc.content:
-                    raise HulyError(
-                        f"Document '{doc_id}' has no content blob ref. "
-                        "Cannot update content that was never created."
-                    )
                 markup = markdown_to_prosemirror(markdown_content or "")
-                ok = await client.set_content(
-                    "document:class:Document", doc.id, "content", doc.content, markup
-                )
-                if not ok:
-                    raise HulyError("Failed to update content via Collaborator RPC.")
+                doc = await _find_document_by_id(client, doc_id)
+                if doc.content and not _is_inline_markup(doc.content):
+                    ok = await client.set_content(
+                        "document:class:Document", doc.id, "content", doc.content, markup
+                    )
+                    if not ok:
+                        raise HulyError("Failed to update content via Collaborator RPC.")
+                else:
+                    blob_ref = await client.create_content(
+                        "document:class:Document",
+                        doc.id,
+                        "content",
+                        markup,
+                        warn_on_error=False,
+                    )
+                    await client.tx(
+                        {
+                            "_class": "core:class:TxUpdateDoc",
+                            "objectClass": "document:class:Document",
+                            "objectSpace": doc.space,
+                            "objectId": doc.id,
+                            "operations": {"content": blob_ref or markup},
+                            "modifiedBy": auth.account_id,
+                            "modifiedOn": int(time.time() * 1000),
+                        }
+                    )
             return doc.title or doc_id
 
         try:
@@ -379,19 +388,15 @@ def docs_describe(
     async def _run() -> tuple[str, str | None]:
         auth = await ensure_auth(config)
         async with HulyClient(config, auth) as client:
-            raw_docs = await client.find_all(
-                "document:class:Document",
-                query={"_id": doc_id},
-                options={"limit": 1},
-            )
-            if not raw_docs:
-                raise NotFoundError(f"Document '{doc_id}' not found.")
-            doc = Document.model_validate(raw_docs[0])
+            doc = await _find_document_by_id(client, doc_id)
             if not doc.content:
                 return doc.title or doc_id, None
-            content = await client.get_content(
-                "document:class:Document", doc.id, "content", doc.content
-            )
+            if _is_inline_markup(doc.content):
+                content = doc.content
+            else:
+                content = await client.get_content(
+                    "document:class:Document", doc.id, "content", doc.content
+                )
         return doc.title or doc_id, content
 
     try:
@@ -440,3 +445,42 @@ def docs_describe(
 
             plain = prosemirror_to_text(content)
             console.print(Panel(plain or "(empty content)", title=f"Content: {title_label}"))
+
+
+@app.command("delete")
+def docs_delete(
+    ctx: typer.Context,
+    doc_id: str = typer.Argument(..., help="Document internal ID."),
+) -> None:
+    """Delete a document."""
+    overrides: dict = ctx.obj or {}
+    config = load_config(
+        url_override=overrides.get("url"),
+        workspace_override=overrides.get("workspace"),
+    )
+
+    async def _run() -> None:
+        auth = await ensure_auth(config)
+        async with HulyClient(config, auth) as client:
+            doc = await _find_document_by_id(client, doc_id)
+            await client.tx(
+                {
+                    "_class": "core:class:TxRemoveDoc",
+                    "objectClass": "document:class:Document",
+                    "objectSpace": doc.space,
+                    "objectId": doc.id,
+                }
+            )
+
+    try:
+        asyncio.run(_run())
+        print_success(f"Document {doc_id} deleted.")
+    except NotFoundError as e:
+        print_error(e.message)
+        raise typer.Exit(1) from e
+    except AuthError as e:
+        print_error(e.message, hint="Run 'huly auth login' to authenticate.")
+        raise typer.Exit(2) from e
+    except HulyError as e:
+        print_error(e.message)
+        raise typer.Exit(1) from e

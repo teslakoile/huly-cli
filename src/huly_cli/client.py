@@ -107,7 +107,13 @@ class HulyClient:
             return None
 
     async def create_content(
-        self, class_id: str, object_id: str, field: str, markup_json: str
+        self,
+        class_id: str,
+        object_id: str,
+        field: str,
+        markup_json: str,
+        *,
+        warn_on_error: bool = True,
     ) -> str | None:
         """Create entity content via Collaborator RPC and return its blob ref."""
         doc_id = self._build_doc_id(class_id, object_id, field)
@@ -123,14 +129,15 @@ class HulyClient:
                     json={
                         "method": "createContent",
                         "payload": {
-                            "content": {field: json_mod.loads(markup_json)},
+                            "content": {field: markup_json},
                         },
                     },
                 )
                 if resp.status_code != 200:
-                    print_warning(
-                        f"createContent failed (HTTP {resp.status_code}): {resp.text[:200]}"
-                    )
+                    if warn_on_error:
+                        print_warning(
+                            f"createContent failed (HTTP {resp.status_code}): {resp.text[:200]}"
+                        )
                     return None
                 data = resp.json()
                 blob_ref = data.get("content", {}).get(field)
@@ -138,11 +145,19 @@ class HulyClient:
                     return None
                 return str(blob_ref)
         except Exception as e:
-            print_warning(f"createContent error: {e}")
+            if warn_on_error:
+                print_warning(f"createContent error: {e}")
             return None
 
     async def set_content(
-        self, class_id: str, object_id: str, field: str, blob_ref: str, markup_json: str
+        self,
+        class_id: str,
+        object_id: str,
+        field: str,
+        blob_ref: str,
+        markup_json: str,
+        *,
+        warn_on_error: bool = True,
     ) -> bool:
         """Update entity content via Collaborator RPC.
 
@@ -162,18 +177,20 @@ class HulyClient:
                         "method": "updateContent",
                         "payload": {
                             "source": blob_ref,
-                            "content": {field: json_mod.loads(markup_json)},
+                            "content": {field: markup_json},
                         },
                     },
                 )
                 if resp.status_code != 200:
-                    print_warning(
-                        f"updateContent failed (HTTP {resp.status_code}): {resp.text[:200]}"
-                    )
+                    if warn_on_error:
+                        print_warning(
+                            f"updateContent failed (HTTP {resp.status_code}): {resp.text[:200]}"
+                        )
                     return False
                 return True
         except Exception as e:
-            print_warning(f"updateContent error: {e}")
+            if warn_on_error:
+                print_warning(f"updateContent error: {e}")
             return False
 
     async def get_description(self, issue_id: str, blob_ref: str) -> str | None:
@@ -183,19 +200,41 @@ class HulyClient:
         """
         return await self.get_content("tracker:class:Issue", issue_id, "description", blob_ref)
 
-    async def create_description(self, issue_id: str, markup_json: str) -> str | None:
+    async def create_description(
+        self,
+        issue_id: str,
+        markup_json: str,
+        *,
+        warn_on_error: bool = True,
+    ) -> str | None:
         """Create issue description content and return the blob ref."""
         return await self.create_content(
-            "tracker:class:Issue", issue_id, "description", markup_json
+            "tracker:class:Issue",
+            issue_id,
+            "description",
+            markup_json,
+            warn_on_error=warn_on_error,
         )
 
-    async def set_description(self, issue_id: str, blob_ref: str, markup_json: str) -> bool:
+    async def set_description(
+        self,
+        issue_id: str,
+        blob_ref: str,
+        markup_json: str,
+        *,
+        warn_on_error: bool = True,
+    ) -> bool:
         """Update issue description via Collaborator RPC.
 
         Thin wrapper around set_content for tracker:class:Issue / description.
         """
         return await self.set_content(
-            "tracker:class:Issue", issue_id, "description", blob_ref, markup_json
+            "tracker:class:Issue",
+            issue_id,
+            "description",
+            blob_ref,
+            markup_json,
+            warn_on_error=warn_on_error,
         )
 
     def _build_doc_id(self, class_id: str, object_id: str, field: str) -> str:

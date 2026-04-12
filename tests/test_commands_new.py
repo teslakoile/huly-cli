@@ -249,3 +249,23 @@ def test_milestones_list_multiple_statuses():
     assert "Sprint 1" in result.output
     assert "Sprint 2" in result.output
     assert "completed" in result.output.lower()
+
+
+def test_milestones_delete_removes_milestone():
+    tx_mock = AsyncMock(return_value={})
+
+    with (
+        _auth_patch(),
+        patch("huly_cli.client.HulyClient.find_all", new=AsyncMock(return_value=MILESTONE_DATA)),
+        patch("huly_cli.client.HulyClient.tx", tx_mock),
+    ):
+        result = runner.invoke(app, ["milestones", "delete", "m1"])
+
+    assert result.exit_code == 0, result.output
+    assert "Milestone m1 deleted." in result.output
+    assert tx_mock.await_args.args[0] == {
+        "_class": "core:class:TxRemoveDoc",
+        "objectClass": "tracker:class:Milestone",
+        "objectSpace": "p1",
+        "objectId": "m1",
+    }

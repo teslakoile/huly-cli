@@ -190,7 +190,7 @@ async def test_create_description(fake_config, fake_auth):
     assert result == "blob-ref-456"
     body = json.loads(route.calls[0].request.content)
     assert body["method"] == "createContent"
-    assert "description" in body["payload"]["content"]
+    assert body["payload"]["content"]["description"] == '{"type":"doc","content":[]}'
 
 
 async def test_set_description(fake_config, fake_auth):
@@ -209,4 +209,4 @@ async def test_set_description(fake_config, fake_auth):
     body = json.loads(route.calls[0].request.content)
     assert body["method"] == "updateContent"
     assert body["payload"]["source"] == "blob-ref-123"
-    assert "description" in body["payload"]["content"]
+    assert body["payload"]["content"]["description"] == '{"type":"doc","content":[]}'

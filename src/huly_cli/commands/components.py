@@ -320,3 +320,50 @@ def components_update(
     except HulyError as e:
         print_error(e.message)
         raise typer.Exit(1) from e
+
+
+@app.command("delete")
+def components_delete(
+    ctx: typer.Context,
+    component_id: str = typer.Argument(..., help="Component internal ID."),
+) -> None:
+    """Delete an existing component."""
+    overrides: dict = ctx.obj or {}
+    config = load_config(
+        url_override=overrides.get("url"),
+        workspace_override=overrides.get("workspace"),
+    )
+
+    async def _run() -> None:
+        auth = await ensure_auth(config)
+        async with HulyClient(config, auth) as client:
+            raw = await client.find_all(
+                "tracker:class:Component",
+                query={"_id": component_id},
+                options={"limit": 1},
+            )
+            if not raw:
+                raise NotFoundError(f"Component '{component_id}' not found.")
+            comp = Component.model_validate(raw[0])
+
+            await client.tx(
+                {
+                    "_class": "core:class:TxRemoveDoc",
+                    "objectClass": "tracker:class:Component",
+                    "objectSpace": comp.space,
+                    "objectId": comp.id,
+                }
+            )
+
+    try:
+        asyncio.run(_run())
+        print_success(f"Component {component_id} deleted.")
+    except NotFoundError as e:
+        print_error(e.message)
+        raise typer.Exit(1) from e
+    except AuthError as e:
+        print_error(e.message, hint="Run 'huly auth login' to authenticate.")
+        raise typer.Exit(2) from e
+    except HulyError as e:
+        print_error(e.message)
+        raise typer.Exit(1) from e
