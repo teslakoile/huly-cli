@@ -96,7 +96,7 @@ def components_list(
     ctx: typer.Context,
     project: Annotated[
         str | None,
-        typer.Option("--project", "-p", help="Filter by project identifier (e.g. ROA)."),
+        typer.Option("--project", "-p", help="Filter by project identifier (e.g. DEMO)."),
     ] = None,
     limit: Annotated[
         int,
@@ -186,7 +186,7 @@ def components_create(
     ctx: typer.Context,
     label: Annotated[str, typer.Option("--label", help="Component label.")] = ...,
     project: Annotated[
-        str, typer.Option("--project", help='Project identifier (e.g. "ROA").')
+        str, typer.Option("--project", help='Project identifier (e.g. "DEMO").')
     ] = ...,
     lead: Annotated[
         str | None, typer.Option("--lead", help="Lead person name (fuzzy match).")

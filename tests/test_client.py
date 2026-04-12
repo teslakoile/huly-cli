@@ -28,11 +28,11 @@ async def test_find_all(fake_config, fake_auth):
 async def test_find_all_with_query(fake_config, fake_auth):
     with respx.mock:
         respx.post("https://test.example.com/_transactor/api/v1/find-all/w-test-123").respond(
-            json={"value": [{"_id": "i2", "identifier": "ROA-1"}], "total": -1}
+            json={"value": [{"_id": "i2", "identifier": "DEMO-1"}], "total": -1}
         )
         async with HulyClient(fake_config, fake_auth) as client:
-            result = await client.find_all("tracker:class:Issue", query={"identifier": "ROA-1"})
-    assert result[0]["identifier"] == "ROA-1"
+            result = await client.find_all("tracker:class:Issue", query={"identifier": "DEMO-1"})
+    assert result[0]["identifier"] == "DEMO-1"
 
 
 async def test_find_all_empty_result(fake_config, fake_auth):

@@ -38,12 +38,12 @@ async def test_find_all_normalizes_scalar_query_values_and_lookup_map(fake_confi
         async with HulyClient(fake_config, fake_auth) as client:
             result = await client.find_all(
                 "tracker:class:Issue",
-                query={"_id": "issue-1", "identifier": "ROA-1"},
+                query={"_id": "issue-1", "identifier": "DEMO-1"},
             )
 
     assert result[0]["_class"] == "tracker:class:Issue"
     assert result[0]["_id"] == "issue-1"
-    assert result[0]["identifier"] == "ROA-1"
+    assert result[0]["identifier"] == "DEMO-1"
     assert result[0]["$lookup"]["assignee"] == {"_id": "person-1", "name": "Doe,John"}
     assert result[0]["$lookup"]["reviewers"] == [
         {"_id": "person-1", "name": "Doe,John"},

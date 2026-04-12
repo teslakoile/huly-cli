@@ -100,25 +100,25 @@ uv run python scripts/live_smoke.py --allow-writes
 
 ```bash
 huly projects list
-huly projects get ROA
+huly projects get DEMO
 ```
 
 ### Issues
 
 ```bash
-huly issues list --project ROA --limit 5
-huly issues get ROA-1
-huly issues describe ROA-1
-huly issues create --project ROA --title "Example" --description "Example description"
-huly issues update ROA-1 --title "Updated title" --status done
-huly issues delete ROA-1
+huly issues list --project DEMO --limit 5
+huly issues get DEMO-1
+huly issues describe DEMO-1
+huly issues create --project DEMO --title "Example" --description "Example description"
+huly issues update DEMO-1 --title "Updated title" --status done
+huly issues delete DEMO-1
 ```
 
 ### Documents
 
 ```bash
 huly documents list --limit 5
-huly documents create --space "RoA - Staff Augmentation" --title "Example Doc"
+huly documents create --space "Engineering" --title "Example Doc"
 huly documents describe DOC_ID --set "Example content"
 huly documents update DOC_ID --title "Updated title"
 huly documents delete DOC_ID
@@ -127,8 +127,8 @@ huly documents delete DOC_ID
 ### Components
 
 ```bash
-huly components list --project ROA --limit 5
-huly components create --project ROA --label "Example Component"
+huly components list --project DEMO --limit 5
+huly components create --project DEMO --label "Example Component"
 huly components update COMPONENT_ID --label "Updated Component"
 huly components delete COMPONENT_ID
 ```
@@ -136,8 +136,8 @@ huly components delete COMPONENT_ID
 ### Milestones
 
 ```bash
-huly milestones list --project ROA --limit 5
-huly milestones create --project ROA --label "Example Milestone" --status planned
+huly milestones list --project DEMO --limit 5
+huly milestones create --project DEMO --label "Example Milestone" --status planned
 huly milestones update MILESTONE_ID --status completed
 huly milestones delete MILESTONE_ID
 ```
@@ -145,7 +145,7 @@ huly milestones delete MILESTONE_ID
 ### Templates
 
 ```bash
-huly templates list --project ROA --limit 5
+huly templates list --project DEMO --limit 5
 huly templates get TEMPLATE_ID
 huly templates describe TEMPLATE_ID
 huly templates describe TEMPLATE_ID --set "Updated description"
@@ -164,7 +164,7 @@ Prefer JSON for agent workflows:
 
 ```bash
 huly --json projects list
-huly --json issues get ROA-1
+huly --json issues get DEMO-1
 ```
 
 ## Troubleshooting

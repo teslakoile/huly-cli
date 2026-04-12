@@ -21,7 +21,7 @@ class TestIssue:
         raw = {
             "_id": "abc123",
             "title": "Test",
-            "identifier": "ROA-1",
+            "identifier": "DEMO-1",
             "number": 1,
             "status": "tracker:status:Backlog",
             "priority": 2,
@@ -104,8 +104,8 @@ class TestIssue:
 
 class TestPerson:
     def test_person_display_name(self):
-        p = Person.model_validate({"_id": "p1", "name": "Naranjo,Kyle"})
-        assert p.display_name == "Kyle Naranjo"
+        p = Person.model_validate({"_id": "p1", "name": "Doe,Jane"})
+        assert p.display_name == "Jane Doe"
 
     def test_person_single_name(self):
         p = Person.model_validate({"_id": "p2", "name": "Admin"})

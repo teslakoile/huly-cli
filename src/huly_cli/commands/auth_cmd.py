@@ -59,7 +59,7 @@ def auth_login(
     # Resolve workspace
     if not config.workspace:
         if sys.stdin.isatty():
-            config.workspace = typer.prompt("Workspace slug", default="efs")
+            config.workspace = typer.prompt("Workspace slug")
         else:
             raise AuthError("Workspace required. Set HULY_WORKSPACE env var.")
 
