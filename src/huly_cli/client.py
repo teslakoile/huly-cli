@@ -23,7 +23,7 @@ class HulyClient:
     def __init__(self, config: HulyConfig, auth: AuthCache) -> None:
         self._config = config
         self._auth = auth
-        self._transactor_base = f"{config.url}/_transactor"
+        self._transactor_base = auth.transactor_base or f"{config.url}/_transactor"
         self._http = httpx.AsyncClient(
             base_url=self._transactor_base,
             headers={"Authorization": f"Bearer {auth.workspace_token}"},

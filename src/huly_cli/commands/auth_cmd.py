@@ -1,4 +1,4 @@
-"""Auth commands: login, status."""
+"""Auth commands: login, login-otp, status."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Annotated
 
 import typer
 
-from huly_cli.auth import check_auth_status, login
+from huly_cli.auth import check_auth_status, login, login_otp, send_otp
 from huly_cli.config import load_config, save_config
 from huly_cli.errors import AuthError
 from huly_cli.output import print_error, print_item, print_success
@@ -73,6 +73,73 @@ def auth_login(
         raise typer.Exit(2) from e
     except Exception as e:
         print_error(f"Login failed: {e}")
+        raise typer.Exit(1) from e
+
+    save_config(config)
+    print_success(
+        f"Logged in as [bold]{auth.email}[/bold] to workspace [bold]{auth.workspace_slug}[/bold]"
+    )
+
+
+@app.command("login-otp")
+def auth_login_otp(
+    ctx: typer.Context,
+    email: Annotated[
+        str | None,
+        typer.Option("--email", "-e", help="Huly account email.", envvar="HULY_EMAIL"),
+    ] = None,
+    code: Annotated[
+        str | None,
+        typer.Option("--code", "-c", help="OTP code from email."),
+    ] = None,
+) -> None:
+    """Log in via email OTP code. Sends a code to your email, then validates it."""
+    overrides: dict = ctx.obj or {}
+    config = load_config(
+        url_override=overrides.get("url"),
+        workspace_override=overrides.get("workspace"),
+    )
+
+    # Resolve email
+    resolved_email = email or config.email
+    if not resolved_email:
+        if sys.stdin.isatty():
+            resolved_email = typer.prompt("Email")
+        else:
+            raise AuthError("Email required. Set --email or HULY_EMAIL env var.")
+
+    # Resolve workspace
+    if not config.workspace:
+        if sys.stdin.isatty():
+            config.workspace = typer.prompt("Workspace slug")
+        else:
+            raise AuthError("Workspace required. Set HULY_WORKSPACE env var.")
+
+    config.email = resolved_email
+
+    if not code:
+        # Send OTP, then prompt for code
+        try:
+            asyncio.run(send_otp(config))
+        except AuthError as e:
+            print_error(e.message)
+            raise typer.Exit(2) from e
+
+        typer.echo(f"OTP code sent to {config.email}")
+        if sys.stdin.isatty():
+            code = typer.prompt("Code")
+        else:
+            raise AuthError("OTP code required. Pass --code.")
+
+    config.otp_code = code
+
+    try:
+        auth = asyncio.run(login_otp(config))
+    except AuthError as e:
+        print_error(e.message)
+        raise typer.Exit(2) from e
+    except Exception as e:
+        print_error(f"OTP login failed: {e}")
         raise typer.Exit(1) from e
 
     save_config(config)
