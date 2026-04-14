@@ -38,9 +38,21 @@ async def login(config: HulyConfig) -> AuthCache:
         )
         resp.raise_for_status()
         body = resp.json()
-        if "error" in body:
+        if "error" in body and body["error"] is not None:
             raise AuthError(f"Login failed: {body['error']}")
-        account_token: str = body["result"]["token"]
+        if "result" not in body or not isinstance(body.get("result"), dict):
+            raise AuthError(
+                "Login failed: unexpected response from accounts API "
+                "(missing 'result' field). The server may be incompatible "
+                "or a proxy may be intercepting the request."
+            )
+        account_token_value = body["result"].get("token")
+        if not account_token_value or not isinstance(account_token_value, str):
+            raise AuthError(
+                "Login failed: accounts API response did not include a 'token' "
+                "in the 'result' payload."
+            )
+        account_token: str = account_token_value
 
         # Step 2: Select workspace
         resp = await http.post(
@@ -54,11 +66,28 @@ async def login(config: HulyConfig) -> AuthCache:
         )
         resp.raise_for_status()
         body = resp.json()
-        if "error" in body:
+        if "error" in body and body["error"] is not None:
             raise AuthError(f"Select workspace failed: {body['error']}")
+        if "result" not in body or not isinstance(body.get("result"), dict):
+            raise AuthError(
+                "Select workspace failed: unexpected response from accounts API "
+                "(missing 'result' field)."
+            )
         ws_result = body["result"]
-        workspace_token: str = ws_result["token"]
-        workspace_id: str = ws_result["workspaceId"]
+        workspace_token_value = ws_result.get("token")
+        workspace_id_value = ws_result.get("workspaceId")
+        if not workspace_token_value or not isinstance(workspace_token_value, str):
+            raise AuthError(
+                "Select workspace failed: response did not include a 'token' "
+                "in the 'result' payload."
+            )
+        if not workspace_id_value or not isinstance(workspace_id_value, str):
+            raise AuthError(
+                "Select workspace failed: response did not include a 'workspaceId' "
+                "in the 'result' payload."
+            )
+        workspace_token: str = workspace_token_value
+        workspace_id: str = workspace_id_value
 
         # Step 3: Get workspace UUID via getUserWorkspaces
         resp = await http.post(
@@ -68,10 +97,10 @@ async def login(config: HulyConfig) -> AuthCache:
         )
         resp.raise_for_status()
         body = resp.json()
-        if "error" in body:
+        if "error" in body and body["error"] is not None:
             raise AuthError(f"getUserWorkspaces failed: {body['error']}")
         workspace_uuid = ""
-        for ws in body.get("result", []):
+        for ws in body.get("result", []) or []:
             if ws.get("workspaceUrl") == config.workspace:
                 workspace_uuid = ws.get("uuid", "")
                 break
