@@ -299,3 +299,72 @@ async def test_collaborator_rpc_retries_create_content(fake_config, fake_auth, m
             ref = await client.create_description("issue1", '{"type":"doc"}')
     assert ref == "blob-new"
     assert call_count == 3
+
+
+# ── Retry-After header handling (Bug A) ──────────────────────────────────────
+
+
+async def test_rate_limit_retry_after_large_seconds_not_converted(fake_config, fake_auth):
+    """Retry-After: 1500 is valid seconds per RFC 7231, must NOT be divided by 1000.
+
+    Regression test for Issue #20 Bug A: the `> 1000` heuristic silently converted
+    a legitimate 1500-second wait into 1.5 seconds.
+    """
+    with respx.mock:
+        respx.post("https://test.example.com/_transactor/api/v1/find-all/w-test-123").respond(
+            429, headers={"Retry-After": "1500"}
+        )
+        async with HulyClient(fake_config, fake_auth) as client:
+            with pytest.raises(RateLimitError) as exc_info:
+                await client.find_all("tracker:class:Issue")
+    # Must be treated as seconds per RFC 7231, not milliseconds.
+    assert exc_info.value.retry_after == 1500.0
+
+
+async def test_rate_limit_retry_after_small_seconds_unchanged(fake_config, fake_auth):
+    """Retry-After: 500 is 500 seconds, must NOT be reinterpreted as ms."""
+    with respx.mock:
+        respx.post("https://test.example.com/_transactor/api/v1/find-all/w-test-123").respond(
+            429, headers={"Retry-After": "500"}
+        )
+        async with HulyClient(fake_config, fake_auth) as client:
+            with pytest.raises(RateLimitError) as exc_info:
+                await client.find_all("tracker:class:Issue")
+    assert exc_info.value.retry_after == 500.0
+
+
+# ── find_all filters non-dict rows (Bug B) ───────────────────────────────────
+
+
+async def test_find_all_drops_null_rows(fake_config, fake_auth):
+    """Non-dict rows (e.g. null) in the server response must be filtered out.
+
+    Regression test for Issue #20 Bug B: the normalisation loop used `continue`
+    to skip non-dicts but left them in the returned list, causing
+    Model.model_validate(None) ValidationError downstream.
+    """
+    with respx.mock:
+        respx.post("https://test.example.com/_transactor/api/v1/find-all/w-test-123").respond(
+            json={"value": [None, {"_id": "x", "name": "real"}], "total": -1}
+        )
+        async with HulyClient(fake_config, fake_auth) as client:
+            result = await client.find_all("tracker:class:Issue")
+    # Only the dict row should survive — the `None` must be dropped, not kept.
+    assert len(result) == 1
+    assert all(isinstance(row, dict) for row in result)
+    assert result[0]["_id"] == "x"
+
+
+async def test_find_all_drops_mixed_non_dict_rows(fake_config, fake_auth):
+    """Mixed non-dict items (null, string, int) must all be filtered out."""
+    with respx.mock:
+        respx.post("https://test.example.com/_transactor/api/v1/find-all/w-test-123").respond(
+            json={
+                "value": [None, "stray-string", 42, {"_id": "keep", "name": "real"}],
+                "total": -1,
+            }
+        )
+        async with HulyClient(fake_config, fake_auth) as client:
+            result = await client.find_all("tracker:class:Issue")
+    assert len(result) == 1
+    assert result[0]["_id"] == "keep"
