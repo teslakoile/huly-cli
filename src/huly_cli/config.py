@@ -12,6 +12,8 @@ from typing import Any
 import tomli_w
 from dotenv import load_dotenv
 
+from huly_cli.errors import ConfigError
+
 CONFIG_DIR = Path.home() / ".config" / "huly"
 CONFIG_FILE = CONFIG_DIR / "config.toml"
 AUTH_FILE = CONFIG_DIR / "auth.json"
@@ -38,11 +40,20 @@ class AuthCache:
 
 
 def _load_toml_config() -> dict[str, Any]:
-    """Load config.toml if it exists."""
-    if CONFIG_FILE.exists():
+    """Load config.toml if it exists.
+
+    Raises ConfigError (a HulyError subclass) on malformed TOML so the top-level
+    handler in main.py can render a clean message instead of a raw traceback.
+    """
+    if not CONFIG_FILE.exists():
+        return {}
+    try:
         with open(CONFIG_FILE, "rb") as f:
             return tomllib.load(f)
-    return {}
+    except tomllib.TOMLDecodeError as e:
+        raise ConfigError(
+            f"Invalid config file {CONFIG_FILE}: {e}. Fix or remove the file and try again."
+        ) from e
 
 
 def load_config(
