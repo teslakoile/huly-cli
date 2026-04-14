@@ -257,14 +257,15 @@ def issues_list(
                 query["space"] = project_doc.id
 
             if status:
+                # Always consult the live workspace status index first: workspaces
+                # may use custom internal ids for a status category, and matching
+                # against the hardcoded STATUS_IDS dict alone silently returns zero
+                # results (issue #17). This mirrors how `issues create` and
+                # `issues update` resolve statuses via `_resolve_issue_status_id`.
+                status_index = await load_issue_status_index(client)
                 status_ids = resolve_status_ids(status, status_index)
                 if not status_ids:
-                    status_index = await load_issue_status_index(client)
-                    status_ids = resolve_status_ids(status, status_index)
-                if not status_ids:
-                    valid = ", ".join(
-                        status_index.available_labels() if status_index else STATUS_IDS.keys()
-                    )
+                    valid = ", ".join(status_index.available_labels())
                     raise HulyError(f"Unknown status '{status}'. Valid values: {valid}")
 
             if len(status_ids) <= 1:
