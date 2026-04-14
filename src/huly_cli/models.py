@@ -79,7 +79,7 @@ class Project(BaseModel):
     sequence: int = 0
     members: list[str] = []
     owners: list[str] = []
-    default_issue_status: str = Field("", alias="defaultIssueStatus")
+    default_issue_status: str | None = Field(None, alias="defaultIssueStatus")
     private: bool = False
     archived: bool = False
 
