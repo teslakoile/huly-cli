@@ -150,6 +150,22 @@ class TestProject:
         proj = Project.model_validate(raw)
         assert proj.default_issue_status == "tracker:status:Backlog"
 
+    def test_project_null_default_issue_status(self):
+        """Regression: API may return defaultIssueStatus=null; model must accept it.
+
+        Previously `default_issue_status: str` raised a ValidationError when the
+        API returned `null`, crashing `huly projects list`. See issue #11.
+        """
+        raw = {
+            "_id": "p1",
+            "identifier": "CORE",
+            "name": "Test",
+            "defaultIssueStatus": None,
+            "archived": False,
+        }
+        proj = Project.model_validate(raw)
+        assert proj.default_issue_status is None
+
 
 # ── PersonAccount ──────────────────────────────────────────────────────────────
 
