@@ -637,3 +637,49 @@ def test_issues_list_status_unknown_in_live_index_raises(fake_auth):
     assert result.exit_code == 1
     assert "Unknown status" in result.output
     assert "no-such-status" in result.output
+
+
+def test_issues_describe_rejects_set_and_set_file(tmp_path):
+    """Regression for #21: passing both --set "" and --set-file must error out.
+
+    An empty string for --set is falsy, so a truthiness check silently bypasses
+    the mutual-exclusion guard. The guard must use an identity check.
+    """
+    tmpfile = tmp_path / "body.md"
+    tmpfile.write_text("from file", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        ["issues", "describe", "DEMO-1", "--set", "", "--set-file", str(tmpfile)],
+    )
+
+    assert result.exit_code != 0, result.output
+    assert "Use either --set or --set-file, not both." in result.output
+
+
+def test_documents_describe_rejects_set_and_set_file(tmp_path):
+    """Regression for #21: passing both --set "" and --set-file must error out."""
+    tmpfile = tmp_path / "body.md"
+    tmpfile.write_text("from file", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        ["documents", "describe", "doc-1", "--set", "", "--set-file", str(tmpfile)],
+    )
+
+    assert result.exit_code != 0, result.output
+    assert "Use either --set or --set-file, not both." in result.output
+
+
+def test_templates_describe_rejects_set_and_set_file(tmp_path):
+    """Regression for #21: passing both --set "" and --set-file must error out."""
+    tmpfile = tmp_path / "body.md"
+    tmpfile.write_text("from file", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        ["templates", "describe", "tmpl-1", "--set", "", "--set-file", str(tmpfile)],
+    )
+
+    assert result.exit_code != 0, result.output
+    assert "Use either --set or --set-file, not both." in result.output
