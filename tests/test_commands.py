@@ -154,6 +154,39 @@ def test_issues_list_empty():
     assert result.exit_code == 0
 
 
+def test_issues_list_handles_null_person_name():
+    """issues list must not crash when a workspace person has name=None."""
+    issue_with_assignee = [
+        {
+            "_id": "i2",
+            "title": "Null name issue",
+            "identifier": "TP-2",
+            "number": 2,
+            "status": "tracker:status:Backlog",
+            "priority": 0,
+            "assignee": "person-null",
+            "description": "",
+            "kind": "",
+            "createdBy": "",
+            "createdOn": 0,
+            "modifiedBy": "",
+            "modifiedOn": 0,
+            "estimation": 0,
+            "labels": 0,
+            "comments": 0,
+            "subIssues": 0,
+            "space": "p1",
+            "dueDate": None,
+        }
+    ]
+    persons_with_null_name = [{"_id": "person-null", "name": None}]
+    find_mock = AsyncMock(side_effect=[issue_with_assignee, persons_with_null_name])
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["issues", "list"])
+    assert result.exit_code == 0, result.output
+    assert "Null name issue" in result.output
+
+
 # ── members list ───────────────────────────────────────────────────────────────
 
 
@@ -257,6 +290,19 @@ def test_labels_list_empty():
     with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
         result = runner.invoke(app, ["labels", "list"])
     assert result.exit_code == 0
+
+
+def test_labels_list_handles_null_title():
+    """labels list must not crash when a TagReference has title=None."""
+    tag_data = [
+        {"_id": "t1", "tag": "tag1", "title": "Real Label", "attachedTo": "i1"},
+        {"_id": "t2", "tag": "tag2", "title": None, "attachedTo": "i2"},
+    ]
+    find_mock = AsyncMock(return_value=tag_data)
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["labels", "list"])
+    assert result.exit_code == 0, result.output
+    assert "Real Label" in result.output
 
 
 # ── JSON output mode ───────────────────────────────────────────────────────────
@@ -389,6 +435,29 @@ def test_components_list_empty():
     with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
         result = runner.invoke(app, ["components", "list"])
     assert result.exit_code == 0
+
+
+def test_components_list_handles_null_person_name():
+    """components list must not crash when a person in the API response has name=None."""
+    component_with_lead = [
+        {
+            "_id": "c2",
+            "label": "Null Lead Component",
+            "description": "Has a lead with null name",
+            "lead": "person-null",
+            "space": "proj1",
+            "createdBy": "",
+            "createdOn": 0,
+            "modifiedBy": "",
+            "modifiedOn": 0,
+        }
+    ]
+    persons_with_null_name = [{"_id": "person-null", "name": None}]
+    find_mock = AsyncMock(side_effect=[component_with_lead, persons_with_null_name])
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["components", "list"])
+    assert result.exit_code == 0, result.output
+    assert "Null Lead Component" in result.output
 
 
 def test_components_list_shows_description():

@@ -39,15 +39,15 @@ def labels_list(ctx: typer.Context) -> None:
         counts: Counter[str] = Counter(t.title for t in tags)
 
         # Deduplicate by title, sorted alphabetically
-        seen: set[str] = set()
+        seen: set[str | None] = set()
         rows: list[dict[str, Any]] = []
-        for t in sorted(tags, key=lambda x: x.title.lower()):
+        for t in sorted(tags, key=lambda x: (x.title or "").lower()):
             if t.title in seen:
                 continue
             seen.add(t.title)
             rows.append(
                 {
-                    "title": t.title,
+                    "title": t.title or "",
                     "count": str(counts[t.title]),
                 }
             )

@@ -50,9 +50,9 @@ class Issue(BaseModel):
     kind: str = ""
     assignee: str | None = None
     due_date: int | None = Field(None, alias="dueDate")
-    created_by: str = Field("", alias="createdBy")
+    created_by: str | None = Field(None, alias="createdBy")
     created_on: int = Field(0, alias="createdOn")
-    modified_by: str = Field("", alias="modifiedBy")
+    modified_by: str | None = Field(None, alias="modifiedBy")
     modified_on: int = Field(0, alias="modifiedOn")
     estimation: int = 0
     labels: Any = 0
@@ -88,10 +88,12 @@ class Person(BaseModel):
     model_config = {"populate_by_name": True}
 
     id: str = Field(alias="_id")
-    name: str  # "LastName,FirstName"
+    name: str | None = None  # "LastName,FirstName"
 
     @property
     def display_name(self) -> str:
+        if not self.name:
+            return ""
         parts = self.name.split(",", 1)
         return f"{parts[1].strip()} {parts[0].strip()}" if len(parts) == 2 else self.name
 
@@ -106,14 +108,14 @@ class PersonAccount(BaseModel):
 
     id: str = Field(alias="_id")  # Account ID
     person: str  # Person ID (Ref to contact:class:Person)
-    email: str = ""
+    email: str | None = None
 
 
 class TagReference(BaseModel):
     model_config = {"populate_by_name": True}
 
-    tag: str
-    title: str
+    tag: str | None = None
+    title: str | None = None
     attached_to: str = Field("", alias="attachedTo")
 
 

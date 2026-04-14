@@ -104,7 +104,7 @@ async def _resolve_person_by_name(client: HulyClient, name: str) -> str:
     needle = name.lower()
     for doc in raw:
         person = Person.model_validate(doc)
-        if needle in person.display_name.lower() or needle in person.name.lower():
+        if needle in person.display_name.lower() or needle in (person.name or "").lower():
             return person.id
     raise NotFoundError(f"Person '{name}' not found.")
 

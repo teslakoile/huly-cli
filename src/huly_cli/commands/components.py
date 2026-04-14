@@ -40,7 +40,7 @@ async def _fetch_person_map(client: HulyClient) -> dict[str, str]:
     raw = await client.find_all("contact:class:Person", options={"limit": 500})
     result: dict[str, str] = {}
     for p in raw:
-        name: str = p.get("name", "")
+        name: str = p.get("name") or ""
         parts = name.split(",", 1)
         display = f"{parts[1].strip()} {parts[0].strip()}" if len(parts) == 2 else name
         result[p["_id"]] = display
@@ -52,7 +52,7 @@ async def _resolve_person_by_name(client: HulyClient, name: str) -> str:
     persons = await client.find_all("contact:class:Person", options={"limit": 500})
     query_lower = name.lower()
     for p in persons:
-        raw_name: str = p.get("name", "")
+        raw_name: str = p.get("name") or ""
         parts = raw_name.split(",", 1)
         display = f"{parts[1].strip()} {parts[0].strip()}" if len(parts) == 2 else raw_name
         if query_lower in display.lower() or query_lower in raw_name.lower():

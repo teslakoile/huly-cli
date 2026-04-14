@@ -98,6 +98,18 @@ class TestIssue:
         issue = Issue.model_validate(raw)
         assert issue.created_by == "user1"
 
+    def test_issue_accepts_null_created_by(self):
+        """Regression test for issue #16: API may return null for createdBy."""
+        raw = {"_id": "x", "title": "T", "createdBy": None}
+        issue = Issue.model_validate(raw)
+        assert issue.created_by is None
+
+    def test_issue_accepts_null_modified_by(self):
+        """Regression test for issue #16: API may return null for modifiedBy."""
+        raw = {"_id": "x", "title": "T", "modifiedBy": None}
+        issue = Issue.model_validate(raw)
+        assert issue.modified_by is None
+
 
 # ── Person ─────────────────────────────────────────────────────────────────────
 
@@ -119,6 +131,16 @@ class TestPerson:
         p = Person.model_validate({"_id": "person-id-123", "name": "Doe,Jane"})
         assert p.id == "person-id-123"
         assert p.display_name == "Jane Doe"
+
+    def test_person_accepts_null_name(self):
+        """Regression test for issue #16: API may return null for name."""
+        p = Person.model_validate({"_id": "p4", "name": None})
+        assert p.name is None
+
+    def test_person_display_name_with_null_name(self):
+        """Regression test for issue #16: display_name must not crash on None."""
+        p = Person.model_validate({"_id": "p5", "name": None})
+        assert p.display_name == ""
 
 
 # ── Project ────────────────────────────────────────────────────────────────────
@@ -181,7 +203,13 @@ class TestPersonAccount:
     def test_person_account_default_email(self):
         raw = {"_id": "acc2", "person": "person2"}
         acc = PersonAccount.model_validate(raw)
-        assert acc.email == ""
+        assert acc.email is None
+
+    def test_person_account_accepts_null_email(self):
+        """Regression test for issue #16: API may return null for email."""
+        raw = {"_id": "acc3", "person": "person3", "email": None}
+        acc = PersonAccount.model_validate(raw)
+        assert acc.email is None
 
 
 # ── TagReference ───────────────────────────────────────────────────────────────
@@ -200,6 +228,18 @@ class TestTagReference:
         raw = {"tag": "t", "title": "Label"}
         tag = TagReference.model_validate(raw)
         assert tag.attached_to == ""
+
+    def test_tag_reference_accepts_null_tag(self):
+        """Regression test for issue #16: API may return null for tag."""
+        raw = {"tag": None, "title": "Label"}
+        tag = TagReference.model_validate(raw)
+        assert tag.tag is None
+
+    def test_tag_reference_accepts_null_title(self):
+        """Regression test for issue #16: API may return null for title."""
+        raw = {"tag": "t", "title": None}
+        tag = TagReference.model_validate(raw)
+        assert tag.title is None
 
 
 # ── Dict constants ─────────────────────────────────────────────────────────────
