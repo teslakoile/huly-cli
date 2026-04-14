@@ -55,7 +55,33 @@ If you run `huly issues list --project MY-WS`, it will fail because `MY-WS` is n
 
 ### Option 1: Install from PyPI
 
-Use this if you only want the CLI and are not modifying the source:
+Use this if you only want the CLI and are not modifying the source.
+
+The package name is `huly-cli`. The executable is `huly`.
+
+#### Recommended: `pipx` (standalone CLI install)
+
+[`pipx`](https://pipx.pypa.io/) is the recommended installer for standalone
+Python CLI tools. It creates an isolated environment per tool, puts the
+executable on `PATH` automatically, and works out of the box on PEP 668
+environments (including modern macOS with Homebrew-managed Python, where bare
+`pip install` is blocked with `externally-managed-environment`).
+
+```bash
+pipx install huly-cli
+huly --help
+```
+
+Upgrade an existing install:
+
+```bash
+pipx upgrade huly-cli
+```
+
+#### Alternative: `pip` (virtualenv or CI)
+
+Use `pip` if you are installing into an existing virtualenv or a controlled
+CI environment:
 
 ```bash
 pip install huly-cli
@@ -68,24 +94,10 @@ Upgrade an existing install:
 pip install --upgrade huly-cli
 ```
 
-The package name is `huly-cli`. The executable is `huly`.
-
-If `huly` is not found after installing, the install directory may not be on your
-`PATH`. Common fixes:
-
-```bash
-# Check where pip installed it
-python -m site --user-base
-# Typical paths to add:
-#   macOS/Linux: ~/.local/bin
-#   Windows:     %APPDATA%\Python\PythonXY\Scripts
-
-# macOS / Linux — add to your shell profile (~/.zshrc, ~/.bashrc, etc.):
-export PATH="$HOME/.local/bin:$PATH"
-
-# Or install with pipx, which handles PATH automatically:
-pipx install huly-cli
-```
+If `huly` is not found after a user-site `pip install`, the install
+directory may not be on your `PATH` (e.g. `~/.local/bin` on macOS/Linux or
+`%APPDATA%\Python\PythonXY\Scripts` on Windows). Either add that directory
+to `PATH`, or switch to `pipx`, which handles `PATH` automatically.
 
 ### Option 2: Use from a source checkout
 
@@ -319,7 +331,13 @@ Expected result at the time of verification:
 
 The package is published on PyPI as `huly-cli`.
 
-Install it with:
+Install it with `pipx` (recommended for end-users):
+
+```bash
+pipx install huly-cli
+```
+
+Or with `pip` (for virtualenvs or CI):
 
 ```bash
 pip install huly-cli
