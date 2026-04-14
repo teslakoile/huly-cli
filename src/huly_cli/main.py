@@ -6,6 +6,7 @@ from typing import Annotated
 
 import typer
 
+from huly_cli import __version__
 from huly_cli.commands import (
     auth_cmd,
     components,
@@ -17,6 +18,7 @@ from huly_cli.commands import (
     projects,
     templates,
 )
+from huly_cli.commands import upgrade as upgrade_cmd
 from huly_cli.errors import HulyError, handle_error
 from huly_cli.output import set_json_mode
 
@@ -36,11 +38,29 @@ app.add_typer(documents.app, name="documents")
 app.add_typer(components.app, name="components")
 app.add_typer(milestones.app, name="milestones")
 app.add_typer(templates.app, name="templates")
+app.command("upgrade", help="Upgrade huly-cli to the latest version from PyPI.")(
+    upgrade_cmd.upgrade
+)
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        print(f"huly-cli {__version__}")
+        raise typer.Exit()
 
 
 @app.callback()
 def global_callback(
     ctx: typer.Context,
+    version: Annotated[
+        bool | None,
+        typer.Option(
+            "--version",
+            callback=_version_callback,
+            is_eager=True,
+            help="Show version and exit.",
+        ),
+    ] = None,
     json_output: Annotated[
         bool,
         typer.Option("--json", help="Output as JSON.", is_eager=False),
