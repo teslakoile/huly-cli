@@ -547,7 +547,7 @@ def test_issues_list_fans_out_multi_status_queries(fake_auth):
         ),
         patch(
             "huly_cli.commands.issues.resolve_status_ids",
-            side_effect=[[], ["status-1", "status-2"]],
+            return_value=["status-1", "status-2"],
         ),
         patch("huly_cli.client.HulyClient.find_all", find_all_mock),
         patch("huly_cli.commands.issues.print_list", side_effect=capture),
@@ -559,3 +559,81 @@ def test_issues_list_fans_out_multi_status_queries(fake_auth):
     assert find_all_mock.await_args_list[1].kwargs["query"] == {"status": "status-2"}
     assert [item["identifier"] for item in captured["items"]] == ["DEMO-1", "DEMO-2"]
     assert [item["status"] for item in captured["items"]] == ["ready", "ready"]
+
+
+def test_issues_list_status_uses_live_index_not_hardcoded(fake_auth):
+    """Regression for #17: --status <name> must use the live workspace id.
+
+    When the workspace has a custom internal id for a status category
+    (e.g. "backlog" → "custom:status:MyBacklog"), the issue query must use
+    that custom id rather than only the hardcoded STATUS_IDS["backlog"]
+    fallback, which silently returns zero results.
+    """
+    custom_status_id = "custom:status:MyBacklog"
+    status_index = IssueStatusIndex(
+        by_id={custom_status_id: {"name": "Backlog", "category": "cat-1"}},
+        ids_by_name={"backlog": [custom_status_id]},
+        ids_by_category_name={"backlog": [custom_status_id]},
+        labels_by_id={custom_status_id: "backlog"},
+    )
+
+    # Return a matched issue only when the live custom id is used; return
+    # nothing for any fallback query (including the hardcoded tracker id).
+    def _find_all_side_effect(
+        _class: str, *_args: object, **kwargs: object
+    ) -> list[dict[str, object]]:
+        if _class == "tracker:class:Issue":
+            query = kwargs.get("query") or {}
+            if query.get("status") == custom_status_id:
+                return [_raw_issue(status=custom_status_id)]
+            return []
+        if _class == "contact:class:Person":
+            return []
+        return []
+
+    find_all_mock = AsyncMock(side_effect=_find_all_side_effect)
+
+    with (
+        patch("huly_cli.commands.issues.ensure_auth", new=AsyncMock(return_value=fake_auth)),
+        patch(
+            "huly_cli.commands.issues.load_issue_status_index",
+            new=AsyncMock(return_value=status_index),
+        ),
+        patch("huly_cli.client.HulyClient.find_all", find_all_mock),
+    ):
+        result = runner.invoke(app, ["issues", "list", "--status", "backlog"])
+
+    assert result.exit_code == 0, result.output
+    issue_queries = [
+        call.kwargs["query"]
+        for call in find_all_mock.await_args_list
+        if call.args and call.args[0] == "tracker:class:Issue"
+    ]
+    status_ids_used = [q.get("status") for q in issue_queries]
+    assert custom_status_id in status_ids_used, (
+        f"expected query to use live workspace id {custom_status_id!r}, got {status_ids_used!r}"
+    )
+
+
+def test_issues_list_status_unknown_in_live_index_raises(fake_auth):
+    """If --status is not resolvable in the live index, surface a clear error."""
+    status_index = IssueStatusIndex(
+        by_id={"status-x": {"name": "Something"}},
+        ids_by_name={"something": ["status-x"]},
+        labels_by_id={"status-x": "something"},
+    )
+    find_all_mock = AsyncMock(return_value=[])
+
+    with (
+        patch("huly_cli.commands.issues.ensure_auth", new=AsyncMock(return_value=fake_auth)),
+        patch(
+            "huly_cli.commands.issues.load_issue_status_index",
+            new=AsyncMock(return_value=status_index),
+        ),
+        patch("huly_cli.client.HulyClient.find_all", find_all_mock),
+    ):
+        result = runner.invoke(app, ["issues", "list", "--status", "no-such-status"])
+
+    assert result.exit_code == 1
+    assert "Unknown status" in result.output
+    assert "no-such-status" in result.output
