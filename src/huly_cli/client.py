@@ -275,11 +275,20 @@ class HulyClient:
                 f"Authentication failed (HTTP {resp.status_code}). Run 'huly auth login'."
             )
         if resp.status_code == 429:
-            retry_after = float(
-                resp.headers.get("Retry-After") or resp.headers.get("Retry-After-ms", 0)
-            )
-            if retry_after > 1000:
-                retry_after /= 1000  # convert ms to seconds
+            # RFC 7231: `Retry-After` is in seconds (or an HTTP-date, unsupported
+            # here). Only the explicitly millisecond-based `Retry-After-ms`
+            # header should be converted — never guess based on magnitude.
+            retry_after_header = resp.headers.get("Retry-After")
+            if retry_after_header is not None:
+                try:
+                    retry_after = float(retry_after_header)
+                except ValueError:
+                    retry_after = 0.0
+            else:
+                try:
+                    retry_after = float(resp.headers.get("Retry-After-ms", 0)) / 1000.0
+                except ValueError:
+                    retry_after = 0.0
             raise RateLimitError("Rate limit exceeded.", retry_after=retry_after)
         if resp.status_code >= 500:
             raise ServerError(f"Server error (HTTP {resp.status_code}): {resp.text[:200]}")
@@ -311,10 +320,13 @@ class HulyClient:
         if not isinstance(rows, list):
             return []
 
+        # Filter out any non-dict entries (e.g. ``None``) up front so callers
+        # never see them. Keeping them in the list caused
+        # ``Model.model_validate`` to raise ``ValidationError`` on null rows.
+        rows = [row for row in rows if isinstance(row, dict)]
+
         if isinstance(lookup_map, dict):
             for row in rows:
-                if not isinstance(row, dict):
-                    continue
                 lookup = row.get("$lookup")
                 if not isinstance(lookup, dict):
                     continue
@@ -325,8 +337,6 @@ class HulyClient:
                         lookup[key] = lookup_map.get(value)
 
         for row in rows:
-            if not isinstance(row, dict):
-                continue
             if row.get("_class") is None:
                 row["_class"] = class_id
             for key, value in query.items():
