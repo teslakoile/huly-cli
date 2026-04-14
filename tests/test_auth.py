@@ -14,7 +14,6 @@ import respx
 from huly_cli import auth as auth_module
 from huly_cli.errors import AuthError
 
-
 ACCOUNTS_URL = "https://test.example.com/_accounts"
 
 
