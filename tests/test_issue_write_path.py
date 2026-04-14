@@ -115,6 +115,104 @@ async def test_create_impl_increments_project_sequence_and_uses_blob_ref(fake_co
     create_description_mock.assert_awaited_once()
 
 
+async def test_create_impl_falls_back_to_inline_markup_when_blob_create_fails(
+    fake_config, fake_auth
+):
+    """When create_description returns None, _create_impl writes inline ProseMirror markup."""
+    project_doc = {
+        "_id": "project-1",
+        "name": "My Project",
+        "identifier": "DEMO",
+        "sequence": 16,
+        "members": [],
+        "owners": [],
+        "description": "",
+        "defaultIssueStatus": "tracker:status:Backlog",
+        "private": False,
+        "archived": False,
+    }
+    find_all_mock = AsyncMock(
+        side_effect=[
+            [project_doc],
+            [{"_id": "issue-16", "rank": "0|i0002f:", "space": "project-1"}],
+        ]
+    )
+    tx_mock = AsyncMock(side_effect=[{"object": {"sequence": 17}}, {}, {}])
+    # create_description returns None → fallback to inline markup
+    create_description_mock = AsyncMock(return_value=None)
+
+    with (
+        patch("huly_cli.commands.issues.ensure_auth", new=AsyncMock(return_value=fake_auth)),
+        patch("huly_cli.client.HulyClient.find_all", find_all_mock),
+        patch("huly_cli.client.HulyClient.tx", tx_mock),
+        patch("huly_cli.client.HulyClient.create_description", create_description_mock),
+    ):
+        message = await issues_cmd._create_impl(
+            fake_config,
+            title="Fix auth drift",
+            project="DEMO",
+            status=None,
+            priority="high",
+            assignee=None,
+            description="# Heading",
+        )
+
+    description_tx = tx_mock.await_args_list[2].args[0]
+    description_value = description_tx["operations"]["description"]
+    # Fallback should write inline ProseMirror JSON, not a blob ref
+    assert isinstance(description_value, str)
+    assert description_value.startswith("{")
+    assert "doc" in description_value  # the ProseMirror dict has a "doc" type
+    assert "DEMO-17" in message
+    create_description_mock.assert_awaited_once()
+
+
+async def test_create_impl_skips_description_tx_when_no_description_provided(
+    fake_config, fake_auth
+):
+    """When description is None/empty, _create_impl should only emit increment + create txs."""
+    project_doc = {
+        "_id": "project-1",
+        "name": "My Project",
+        "identifier": "DEMO",
+        "sequence": 16,
+        "members": [],
+        "owners": [],
+        "description": "",
+        "defaultIssueStatus": "tracker:status:Backlog",
+        "private": False,
+        "archived": False,
+    }
+    find_all_mock = AsyncMock(
+        side_effect=[
+            [project_doc],
+            [{"_id": "issue-16", "rank": "0|i0002f:", "space": "project-1"}],
+        ]
+    )
+    tx_mock = AsyncMock(side_effect=[{"object": {"sequence": 17}}, {}])
+    create_description_mock = AsyncMock(return_value="blob-description-x")
+
+    with (
+        patch("huly_cli.commands.issues.ensure_auth", new=AsyncMock(return_value=fake_auth)),
+        patch("huly_cli.client.HulyClient.find_all", find_all_mock),
+        patch("huly_cli.client.HulyClient.tx", tx_mock),
+        patch("huly_cli.client.HulyClient.create_description", create_description_mock),
+    ):
+        await issues_cmd._create_impl(
+            fake_config,
+            title="No description",
+            project="DEMO",
+            status=None,
+            priority="medium",
+            assignee=None,
+            description=None,
+        )
+
+    # Only two tx calls: increment, then create (no description tx)
+    assert tx_mock.await_count == 2
+    create_description_mock.assert_not_awaited()
+
+
 async def test_update_impl_resolves_custom_status_and_unassigns(fake_config, fake_auth):
     issue = Issue.model_validate(_raw_issue(space="project-1"))
     tx_mock = AsyncMock(return_value={})

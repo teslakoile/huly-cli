@@ -430,3 +430,290 @@ def test_components_delete_removes_component():
         "objectSpace": "proj1",
         "objectId": "c1",
     }
+
+
+# ── projects get ───────────────────────────────────────────────────────────────
+
+
+def test_projects_get_by_identifier():
+    """projects get DEMO returns project details when identifier matches (case-insensitive)."""
+    project_data = [
+        {
+            "_id": "p-demo",
+            "name": "Demo Project",
+            "identifier": "DEMO",
+            "members": ["a1", "a2"],
+            "owners": ["a1"],
+            "sequence": 17,
+            "description": "A demo project.",
+            "defaultIssueStatus": "tracker:status:Backlog",
+            "private": False,
+            "archived": False,
+        }
+    ]
+    find_mock = AsyncMock(return_value=project_data)
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["projects", "get", "demo"])
+    assert result.exit_code == 0, result.output
+    assert "DEMO" in result.output
+    assert "Demo Project" in result.output
+
+
+def test_projects_get_by_internal_id():
+    """projects get matches by internal _id when identifier doesn't match."""
+    project_data = [
+        {
+            "_id": "p-demo",
+            "name": "Demo Project",
+            "identifier": "DEMO",
+            "members": [],
+            "owners": [],
+            "sequence": 0,
+            "description": "",
+            "defaultIssueStatus": "",
+            "private": False,
+            "archived": False,
+        }
+    ]
+    find_mock = AsyncMock(return_value=project_data)
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["projects", "get", "p-demo"])
+    assert result.exit_code == 0, result.output
+    assert "Demo Project" in result.output
+
+
+def test_projects_get_not_found_exits_nonzero():
+    """projects get raises NotFoundError when no project matches the identifier."""
+    project_data = [
+        {
+            "_id": "p1",
+            "name": "Other Project",
+            "identifier": "OTHER",
+            "members": [],
+            "owners": [],
+            "sequence": 0,
+            "description": "",
+            "defaultIssueStatus": "",
+            "private": False,
+            "archived": False,
+        }
+    ]
+    find_mock = AsyncMock(return_value=project_data)
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["projects", "get", "MISSING"])
+    assert result.exit_code == 1
+    assert "not found" in result.output.lower() or "MISSING" in result.output
+
+
+def test_projects_get_json_mode():
+    """projects get emits JSON envelope when --json is set."""
+    import json as json_mod
+
+    project_data = [
+        {
+            "_id": "p-demo",
+            "name": "Demo Project",
+            "identifier": "DEMO",
+            "members": [],
+            "owners": [],
+            "sequence": 0,
+            "description": "",
+            "defaultIssueStatus": "",
+            "private": False,
+            "archived": False,
+        }
+    ]
+    find_mock = AsyncMock(return_value=project_data)
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["--json", "projects", "get", "DEMO"])
+    assert result.exit_code == 0, result.output
+    data = json_mod.loads(result.output)
+    assert data["ok"] is True
+    assert data["data"]["identifier"] == "DEMO"
+    assert data["data"]["name"] == "Demo Project"
+
+
+# ── components create / update ────────────────────────────────────────────────
+
+
+def test_components_create_writes_create_doc_tx():
+    """components create resolves project, generates an id, and emits a TxCreateDoc."""
+    project_data = [
+        {
+            "_id": "proj1",
+            "name": "Test Project",
+            "identifier": "TP",
+            "members": [],
+            "owners": [],
+            "sequence": 0,
+            "description": "",
+            "defaultIssueStatus": "",
+            "private": False,
+            "archived": False,
+        }
+    ]
+    tx_mock = AsyncMock(return_value={})
+    find_mock = AsyncMock(return_value=project_data)
+
+    with (
+        _auth_patch(),
+        patch("huly_cli.client.HulyClient.find_all", find_mock),
+        patch("huly_cli.client.HulyClient.tx", tx_mock),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "components",
+                "create",
+                "--label",
+                "Auth Service",
+                "--project",
+                "TP",
+                "--description",
+                "Handles auth",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "Component created" in result.output
+    create_tx = tx_mock.await_args.args[0]
+    assert create_tx["_class"] == "core:class:TxCreateDoc"
+    assert create_tx["objectClass"] == "tracker:class:Component"
+    assert create_tx["objectSpace"] == "proj1"
+    assert create_tx["attributes"]["label"] == "Auth Service"
+    assert create_tx["attributes"]["description"] == "Handles auth"
+    assert create_tx["attributes"]["lead"] is None
+
+
+def test_components_create_with_lead_resolves_person():
+    """components create with --lead fuzzy-matches the lead person and stores the person id."""
+    project_data = [
+        {
+            "_id": "proj1",
+            "name": "Test Project",
+            "identifier": "TP",
+            "members": [],
+            "owners": [],
+            "sequence": 0,
+            "description": "",
+            "defaultIssueStatus": "",
+            "private": False,
+            "archived": False,
+        }
+    ]
+    person_data = [{"_id": "person-1", "name": "Doe,John"}]
+    find_mock = AsyncMock(side_effect=[project_data, person_data])
+    tx_mock = AsyncMock(return_value={})
+
+    with (
+        _auth_patch(),
+        patch("huly_cli.client.HulyClient.find_all", find_mock),
+        patch("huly_cli.client.HulyClient.tx", tx_mock),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "components",
+                "create",
+                "--label",
+                "Auth Service",
+                "--project",
+                "TP",
+                "--lead",
+                "john",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    create_tx = tx_mock.await_args.args[0]
+    assert create_tx["attributes"]["lead"] == "person-1"
+
+
+def test_components_create_project_not_found_exits_nonzero():
+    """components create exits with code 1 when the project identifier does not resolve."""
+    find_mock = AsyncMock(return_value=[])  # no projects
+    tx_mock = AsyncMock(return_value={})
+
+    with (
+        _auth_patch(),
+        patch("huly_cli.client.HulyClient.find_all", find_mock),
+        patch("huly_cli.client.HulyClient.tx", tx_mock),
+    ):
+        result = runner.invoke(
+            app,
+            ["components", "create", "--label", "X", "--project", "MISSING"],
+        )
+
+    assert result.exit_code == 1
+    tx_mock.assert_not_awaited()
+
+
+def test_components_update_writes_update_doc_tx():
+    """components update applies provided fields as a TxUpdateDoc."""
+    tx_mock = AsyncMock(return_value={})
+
+    with (
+        _auth_patch(),
+        patch("huly_cli.client.HulyClient.find_all", new=AsyncMock(return_value=COMPONENT_DATA)),
+        patch("huly_cli.client.HulyClient.tx", tx_mock),
+    ):
+        result = runner.invoke(
+            app,
+            ["components", "update", "c1", "--label", "Renamed", "--description", "Updated"],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "Component c1 updated." in result.output
+    update_tx = tx_mock.await_args.args[0]
+    assert update_tx["_class"] == "core:class:TxUpdateDoc"
+    assert update_tx["objectClass"] == "tracker:class:Component"
+    assert update_tx["objectSpace"] == "proj1"
+    assert update_tx["objectId"] == "c1"
+    assert update_tx["operations"] == {"label": "Renamed", "description": "Updated"}
+
+
+def test_components_update_unassigns_lead_with_empty_string():
+    """components update --lead "" should null out the lead field."""
+    tx_mock = AsyncMock(return_value={})
+
+    with (
+        _auth_patch(),
+        patch("huly_cli.client.HulyClient.find_all", new=AsyncMock(return_value=COMPONENT_DATA)),
+        patch("huly_cli.client.HulyClient.tx", tx_mock),
+    ):
+        result = runner.invoke(app, ["components", "update", "c1", "--lead", ""])
+
+    assert result.exit_code == 0, result.output
+    update_tx = tx_mock.await_args.args[0]
+    assert update_tx["operations"] == {"lead": None}
+
+
+def test_components_update_no_fields_warns_and_skips_tx():
+    """components update with no fields prints a warning and does not emit a tx."""
+    tx_mock = AsyncMock(return_value={})
+
+    with (
+        _auth_patch(),
+        patch("huly_cli.client.HulyClient.find_all", new=AsyncMock(return_value=COMPONENT_DATA)),
+        patch("huly_cli.client.HulyClient.tx", tx_mock),
+    ):
+        result = runner.invoke(app, ["components", "update", "c1"])
+
+    assert result.exit_code == 0, result.output
+    tx_mock.assert_not_awaited()
+
+
+def test_components_update_not_found_exits_nonzero():
+    """components update exits with code 1 when the component is not found."""
+    find_mock = AsyncMock(return_value=[])
+    tx_mock = AsyncMock(return_value={})
+
+    with (
+        _auth_patch(),
+        patch("huly_cli.client.HulyClient.find_all", find_mock),
+        patch("huly_cli.client.HulyClient.tx", tx_mock),
+    ):
+        result = runner.invoke(app, ["components", "update", "missing-id", "--label", "X"])
+
+    assert result.exit_code == 1
+    tx_mock.assert_not_awaited()
