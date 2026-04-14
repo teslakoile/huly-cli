@@ -177,7 +177,7 @@ def templates_describe(
     Template descriptions are stored as inline ProseMirror JSON (not a blob ref).
     By default, reads and displays the description. Use --set or --set-file to write.
     """
-    if set_text and set_file:
+    if set_text is not None and set_file is not None:
         print_error("Use either --set or --set-file, not both.")
         raise typer.Exit(1)
 
