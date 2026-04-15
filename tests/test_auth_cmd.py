@@ -67,7 +67,7 @@ def test_auth_login_uses_config_credentials_when_flags_omitted():
         url="https://huly.example.com",
         workspace="fake-ws",
         email="env-user@example.com",
-        password="env-pass",
+        password="fake_test_password",  # pragma: allowlist secret
     )
     login_mock = AsyncMock(return_value=FAKE_AUTH)
 
