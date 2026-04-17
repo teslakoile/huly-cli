@@ -110,6 +110,14 @@ class TestIssue:
         issue = Issue.model_validate(raw)
         assert issue.modified_by is None
 
+    def test_issue_accepts_dict_description_after_normalization(self):
+        """Regression for #30: API may return inline ProseMirror dict for description."""
+        from huly_cli.commands.issues import _normalize_issue_doc
+        raw = {"_id": "x", "title": "T", "description": {"type": "doc", "content": []}}
+        normalized = _normalize_issue_doc(raw)
+        issue = Issue.model_validate(normalized)
+        assert issue.description.startswith("{")
+
 
 # ── Person ─────────────────────────────────────────────────────────────────────
 

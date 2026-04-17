@@ -48,8 +48,11 @@ async def _fetch_person_map(client: HulyClient) -> dict[str, str]:
 def _normalize_issue_doc(raw: dict[str, Any]) -> dict[str, Any]:
     """Coerce live issue documents into the local model's shape."""
     normalized = dict(raw)
-    if normalized.get("description") is None:
+    desc = normalized.get("description")
+    if desc is None:
         normalized["description"] = ""
+    elif isinstance(desc, dict):
+        normalized["description"] = json.dumps(desc)
     return normalized
 
 
@@ -458,13 +461,18 @@ async def _create_impl(
 
             markup = markdown_to_prosemirror(description)
             description_ref = await client.create_description(new_id, markup, warn_on_error=False)
+            if description_ref is None:
+                raise HulyError(
+                    "Failed to create description via Collaborator. "
+                    "The issue was created without a description."
+                )
             await client.tx(
                 {
                     "_class": "core:class:TxUpdateDoc",
                     "objectClass": "tracker:class:Issue",
                     "objectSpace": project_doc.id,
                     "objectId": new_id,
-                    "operations": {"description": description_ref or markup},
+                    "operations": {"description": description_ref},
                 }
             )
         return (
@@ -609,13 +617,17 @@ def issues_describe(
                     blob_ref = await client.create_description(
                         issue.id, markup, warn_on_error=False
                     )
+                    if blob_ref is None:
+                        raise HulyError(
+                            "Failed to create description via Collaborator."
+                        )
                     await client.tx(
                         {
                             "_class": "core:class:TxUpdateDoc",
                             "objectClass": "tracker:class:Issue",
                             "objectSpace": issue.space,
                             "objectId": issue.id,
-                            "operations": {"description": blob_ref or markup},
+                            "operations": {"description": blob_ref},
                         }
                     )
             return issue.identifier or identifier

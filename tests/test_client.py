@@ -193,6 +193,41 @@ async def test_create_description(fake_config, fake_auth):
     assert body["payload"]["content"]["description"] == '{"type":"doc","content":[]}'
 
 
+async def test_create_content_falls_back_to_update_content(fake_config, fake_auth):
+    """Regression for #31/#32: when createContent fails, fall back to updateContent."""
+    doc_id = urllib.parse.quote("uuid-test-456|tracker:class:Issue|issue1|description", safe="")
+    call_count = 0
+
+    def side_effect(request, route):
+        nonlocal call_count
+        call_count += 1
+        body = json.loads(request.content)
+        if body["method"] == "createContent":
+            return respx.MockResponse(500, text='{"error":"The specified bucket does not exist"}')
+        # updateContent fallback succeeds
+        return respx.MockResponse(200, json={})
+
+    with respx.mock:
+        respx.post(f"https://test.example.com/_collaborator/rpc/{doc_id}").mock(
+            side_effect=side_effect
+        )
+        async with HulyClient(fake_config, fake_auth) as client:
+            # Disable retry delay for test speed
+            import huly_cli.client as client_mod
+
+            original_delay = client_mod._RETRY_BASE_DELAY
+            client_mod._RETRY_BASE_DELAY = 0.01
+            try:
+                result = await client.create_description(
+                    "issue1", '{"type":"doc","content":[]}', warn_on_error=False
+                )
+            finally:
+                client_mod._RETRY_BASE_DELAY = original_delay
+
+    assert result is not None
+    assert result.startswith("issue1-description-")
+
+
 async def test_set_description(fake_config, fake_auth):
     doc_id = urllib.parse.quote("uuid-test-456|tracker:class:Issue|issue1|description", safe="")
     with respx.mock:

@@ -356,13 +356,17 @@ def docs_describe(
                         markup,
                         warn_on_error=False,
                     )
+                    if blob_ref is None:
+                        raise HulyError(
+                            "Failed to create content via Collaborator."
+                        )
                     await client.tx(
                         {
                             "_class": "core:class:TxUpdateDoc",
                             "objectClass": "document:class:Document",
                             "objectSpace": doc.space,
                             "objectId": doc.id,
-                            "operations": {"content": blob_ref or markup},
+                            "operations": {"content": blob_ref},
                             "modifiedBy": auth.account_id,
                             "modifiedOn": int(time.time() * 1000),
                         }

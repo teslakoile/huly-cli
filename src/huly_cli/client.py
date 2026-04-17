@@ -161,7 +161,13 @@ class HulyClient:
         *,
         warn_on_error: bool = True,
     ) -> str | None:
-        """Create entity content via Collaborator RPC and return its blob ref."""
+        """Create entity content via Collaborator RPC and return its blob ref.
+
+        Falls back to ``updateContent`` with an empty source when the
+        ``createContent`` RPC fails (e.g. missing blob-storage bucket).
+        In that case a blob ref is constructed locally using the standard
+        ``{objectId}-{field}-{timestamp}`` format.
+        """
         resp = await self._collaborator_rpc(
             class_id,
             object_id,
@@ -169,15 +175,27 @@ class HulyClient:
             method="createContent",
             payload={"content": {field: markup_json}},
         )
-        if resp is None:
-            if warn_on_error:
-                self._warn_rpc_failure("createContent")
-            return None
-        data = resp.json()
-        blob_ref = data.get("content", {}).get(field)
-        if blob_ref is None:
-            return None
-        return str(blob_ref)
+        if resp is not None:
+            data = resp.json()
+            blob_ref = data.get("content", {}).get(field)
+            if blob_ref is not None:
+                return str(blob_ref)
+
+        # Fallback: updateContent with empty source, construct ref locally
+        resp2 = await self._collaborator_rpc(
+            class_id,
+            object_id,
+            field,
+            method="updateContent",
+            payload={"source": "", "content": {field: markup_json}},
+        )
+        if resp2 is not None:
+            ts = int(time.time() * 1000)
+            return f"{object_id}-{field}-{ts}"
+
+        if warn_on_error:
+            self._warn_rpc_failure("createContent")
+        return None
 
     async def set_content(
         self,
