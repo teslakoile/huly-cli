@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from typer.testing import CliRunner
 
 from huly_cli.commands import issues as issues_cmd
+from huly_cli.errors import HulyError
 from huly_cli.issue_utils import IssueStatusIndex
 from huly_cli.main import app
 from huly_cli.models import Issue
@@ -144,8 +146,6 @@ async def test_create_impl_errors_when_blob_create_fails(fake_config, fake_auth)
         patch("huly_cli.client.HulyClient.tx", tx_mock),
         patch("huly_cli.client.HulyClient.create_description", create_description_mock),
     ):
-        import pytest
-        from huly_cli.errors import HulyError
         with pytest.raises(HulyError, match="Failed to create description"):
             await issues_cmd._create_impl(
                 fake_config,
