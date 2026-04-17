@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from typer.testing import CliRunner
 
 from huly_cli.commands import issues as issues_cmd
+from huly_cli.errors import HulyError
 from huly_cli.issue_utils import IssueStatusIndex
 from huly_cli.main import app
 from huly_cli.models import Issue
@@ -115,10 +117,8 @@ async def test_create_impl_increments_project_sequence_and_uses_blob_ref(fake_co
     create_description_mock.assert_awaited_once()
 
 
-async def test_create_impl_falls_back_to_inline_markup_when_blob_create_fails(
-    fake_config, fake_auth
-):
-    """When create_description returns None, _create_impl writes inline ProseMirror markup."""
+async def test_create_impl_errors_when_blob_create_fails(fake_config, fake_auth):
+    """When create_description returns None, _create_impl raises HulyError."""
     project_doc = {
         "_id": "project-1",
         "name": "My Project",
@@ -137,8 +137,7 @@ async def test_create_impl_falls_back_to_inline_markup_when_blob_create_fails(
             [{"_id": "issue-16", "rank": "0|i0002f:", "space": "project-1"}],
         ]
     )
-    tx_mock = AsyncMock(side_effect=[{"object": {"sequence": 17}}, {}, {}])
-    # create_description returns None → fallback to inline markup
+    tx_mock = AsyncMock(side_effect=[{"object": {"sequence": 17}}, {}])
     create_description_mock = AsyncMock(return_value=None)
 
     with (
@@ -147,24 +146,16 @@ async def test_create_impl_falls_back_to_inline_markup_when_blob_create_fails(
         patch("huly_cli.client.HulyClient.tx", tx_mock),
         patch("huly_cli.client.HulyClient.create_description", create_description_mock),
     ):
-        message = await issues_cmd._create_impl(
-            fake_config,
-            title="Fix auth drift",
-            project="DEMO",
-            status=None,
-            priority="high",
-            assignee=None,
-            description="# Heading",
-        )
-
-    description_tx = tx_mock.await_args_list[2].args[0]
-    description_value = description_tx["operations"]["description"]
-    # Fallback should write inline ProseMirror JSON, not a blob ref
-    assert isinstance(description_value, str)
-    assert description_value.startswith("{")
-    assert "doc" in description_value  # the ProseMirror dict has a "doc" type
-    assert "DEMO-17" in message
-    create_description_mock.assert_awaited_once()
+        with pytest.raises(HulyError, match="Failed to create description"):
+            await issues_cmd._create_impl(
+                fake_config,
+                title="Fix auth drift",
+                project="DEMO",
+                status=None,
+                priority="high",
+                assignee=None,
+                description="# Heading",
+            )
 
 
 async def test_create_impl_skips_description_tx_when_no_description_provided(
@@ -270,8 +261,8 @@ def test_issues_describe_set_creates_blob_ref_when_missing(fake_auth):
     assert tx_mock.await_args.args[0]["operations"] == {"description": "blob-description-2"}
 
 
-def test_issues_describe_set_falls_back_to_inline_markup_when_blob_create_fails(fake_auth):
-    tx_mock = AsyncMock(return_value={})
+def test_issues_describe_set_errors_when_blob_create_fails(fake_auth):
+    """When create_description returns None, describe --set shows an error."""
     create_description_mock = AsyncMock(return_value=None)
 
     with (
@@ -281,15 +272,11 @@ def test_issues_describe_set_falls_back_to_inline_markup_when_blob_create_fails(
             new=AsyncMock(return_value=[_raw_issue(description=None)]),
         ),
         patch("huly_cli.client.HulyClient.create_description", create_description_mock),
-        patch("huly_cli.client.HulyClient.tx", tx_mock),
     ):
         result = runner.invoke(app, ["issues", "describe", "DEMO-1", "--set", "hello world"])
 
-    assert result.exit_code == 0, result.output
-    assert "Description updated for DEMO-1." in result.output
-    description_value = tx_mock.await_args.args[0]["operations"]["description"]
-    assert isinstance(description_value, str)
-    assert description_value.startswith("{")
+    assert result.exit_code == 1, result.output
+    assert "Failed to create description" in result.output
 
 
 def test_documents_describe_set_creates_blob_ref_when_missing(fake_auth):
@@ -331,8 +318,8 @@ def test_documents_describe_set_creates_blob_ref_when_missing(fake_auth):
     assert tx_mock.await_args.args[0]["operations"] == {"content": "blob-content-2"}
 
 
-def test_documents_describe_set_falls_back_to_inline_markup_when_blob_create_fails(fake_auth):
-    tx_mock = AsyncMock(return_value={})
+def test_documents_describe_set_errors_when_blob_create_fails(fake_auth):
+    """When create_content returns None, documents describe --set shows an error."""
     create_content_mock = AsyncMock(return_value=None)
 
     with (
@@ -360,15 +347,58 @@ def test_documents_describe_set_falls_back_to_inline_markup_when_blob_create_fai
             ),
         ),
         patch("huly_cli.client.HulyClient.create_content", create_content_mock),
-        patch("huly_cli.client.HulyClient.tx", tx_mock),
     ):
         result = runner.invoke(app, ["documents", "describe", "doc-1", "--set", "hello world"])
 
-    assert result.exit_code == 0, result.output
-    assert "Content updated for 'My Doc'." in result.output
-    content_value = tx_mock.await_args.args[0]["operations"]["content"]
-    assert isinstance(content_value, str)
-    assert content_value.startswith("{")
+    assert result.exit_code == 1, result.output
+    assert "Failed to create content" in result.output
+
+
+def test_issues_create_errors_when_collaborator_unavailable(fake_auth):
+    """Regression for #31: issues create --description must not silently write inline markup."""
+    project_doc = {
+        "_id": "project-1",
+        "name": "My Project",
+        "identifier": "DEMO",
+        "sequence": 16,
+        "members": [],
+        "owners": [],
+        "description": "",
+        "defaultIssueStatus": "tracker:status:Backlog",
+        "private": False,
+        "archived": False,
+    }
+    find_all_mock = AsyncMock(
+        side_effect=[
+            [project_doc],
+            [{"_id": "issue-16", "rank": "0|i0002f:", "space": "project-1"}],
+        ]
+    )
+    tx_mock = AsyncMock(side_effect=[{"object": {"sequence": 17}}, {}])
+    create_description_mock = AsyncMock(return_value=None)
+
+    with (
+        patch("huly_cli.commands.issues.ensure_auth", new=AsyncMock(return_value=fake_auth)),
+        patch("huly_cli.client.HulyClient.find_all", find_all_mock),
+        patch("huly_cli.client.HulyClient.tx", tx_mock),
+        patch("huly_cli.client.HulyClient.create_description", create_description_mock),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "issues",
+                "create",
+                "--title",
+                "Test",
+                "--project",
+                "DEMO",
+                "--description",
+                "# Heading",
+            ],
+        )
+
+    assert result.exit_code == 1, result.output
+    assert "Failed to create description" in result.output
 
 
 def test_issues_describe_reads_inline_markup_without_collaborator(fake_auth):
@@ -637,6 +667,66 @@ def test_issues_list_status_unknown_in_live_index_raises(fake_auth):
     assert result.exit_code == 1
     assert "Unknown status" in result.output
     assert "no-such-status" in result.output
+
+
+def test_issues_get_handles_dict_description(fake_auth):
+    """Regression for #30: issues get must not crash on inline ProseMirror dict."""
+    raw = _raw_issue(
+        description={
+            "type": "doc",
+            "content": [{"type": "paragraph", "content": [{"type": "text", "text": "hello"}]}],
+        }
+    )
+
+    with (
+        patch("huly_cli.commands.issues.ensure_auth", new=AsyncMock(return_value=fake_auth)),
+        patch(
+            "huly_cli.client.HulyClient.find_all",
+            new=AsyncMock(side_effect=[[raw], []]),
+        ),
+    ):
+        result = runner.invoke(app, ["issues", "get", "DEMO-1"])
+
+    assert result.exit_code == 0, result.output
+
+
+def test_issues_describe_reads_dict_description(fake_auth):
+    """Regression for #30: issues describe must handle inline ProseMirror dict."""
+    raw = _raw_issue(
+        description={
+            "type": "doc",
+            "content": [{"type": "paragraph", "content": [{"type": "text", "text": "hello"}]}],
+        }
+    )
+
+    with (
+        patch("huly_cli.commands.issues.ensure_auth", new=AsyncMock(return_value=fake_auth)),
+        patch(
+            "huly_cli.client.HulyClient.find_all",
+            new=AsyncMock(return_value=[raw]),
+        ),
+    ):
+        result = runner.invoke(app, ["--json", "issues", "describe", "DEMO-1"])
+
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data["description"] == "hello"
+
+
+def test_issues_list_handles_dict_description(fake_auth):
+    """Regression for #30: issues list must not crash on inline ProseMirror dict."""
+    raw = _raw_issue(description={"type": "doc", "content": []})
+
+    with (
+        patch("huly_cli.commands.issues.ensure_auth", new=AsyncMock(return_value=fake_auth)),
+        patch(
+            "huly_cli.client.HulyClient.find_all",
+            new=AsyncMock(side_effect=[[raw], []]),
+        ),
+    ):
+        result = runner.invoke(app, ["issues", "list"])
+
+    assert result.exit_code == 0, result.output
 
 
 def test_issues_describe_rejects_set_and_set_file(tmp_path):
