@@ -2,48 +2,33 @@
 
 Python CLI for interacting with a Huly workspace from the terminal.
 
-## Status
+## Features
 
-This repo is currently a Python `typer` CLI, not a Node or `pnpm` project.
+Full CRUD support for the core Huly entities:
 
-It has been checked against `hcengineering/platform@v0.6.504` and smoke-tested against
-`https://huly.example.com` workspace `my-ws`.
+| Command       | list | get | create | update | delete | describe |
+|---------------|:----:|:---:|:------:|:------:|:------:|:--------:|
+| `projects`    |  x   |  x  |        |        |        |          |
+| `issues`      |  x   |  x  |   x    |   x    |   x    |    x     |
+| `documents`   |  x   |  x  |   x    |   x    |   x    |    x     |
+| `components`  |  x   |  x  |   x    |   x    |   x    |          |
+| `milestones`  |  x   |  x  |   x    |   x    |   x    |          |
+| `templates`   |  x   |  x  |        |        |        |    x     |
+| `labels`      |  x   |  x  |   x    |   x    |   x    |          |
+| `members`     |  x   |     |        |        |        |          |
 
-What is verified today:
+Additional capabilities:
 
-- Authentication flow via `/_accounts`
-- Read access for projects, issues, components, documents, templates, members, labels, and issue descriptions
-- Live CRUD for issues, documents, components, and milestones on `https://huly.example.com` workspace `my-ws`
-- Live template description update and restore flow
-- Workspace-specific issue status display and status filtering
-- Local unit/CLI test suite
-- CI-equivalent local checks:
-  `uv sync --extra dev`, `uv run ruff check .`, `uv run ruff format --check .`,
-  `uv run pytest tests/ -v`, `uv run python -m build`, and `uv run twine check dist/*`
-
-What is not fully verified yet:
-
-- Automated live-workspace CI has not been added
-- You should still prefer a disposable project or disposable teamspace for release-time live smoke tests
-
-Known live compatibility gaps at the time of writing:
-
-- No known read-path breakage remains from the `v0.6.504` comparison and smoke tests
-- No known CLI CRUD gap remains on the currently implemented issue, document, component, and milestone surfaces
-- The test suite now patches auth correctly; it no longer depends on a developer's local cached login state
-
-## Compatibility Target
-
-- Huly platform tag: `v0.6.504`
-- Example workspace URL used during verification:
-  `https://huly.example.com/workbench/my-ws/tracker/PROJECT_ID/issues`
-
-Important distinction:
-
-- `my-ws` is the workspace slug
-- `DEMO` is the project identifier in that workspace
-
-If you run `huly issues list --project MY-WS`, it will fail because `MY-WS` is not a project ID.
+- **Issue descriptions & document content**: read and write rich-text content
+  via the Collaborator RPC. Markdown is converted to/from ProseMirror JSON
+  automatically.
+- **Issue fields**: priority, status, assignee, due date, component, and labels
+  (repeatable `--label` flag on create/update)
+- **Status filtering**: `issues list --status <name>` resolves against the live
+  workspace status index, supporting custom statuses
+- **JSON mode**: `huly --json <command>` for machine-readable output
+- **Self-upgrade**: `huly upgrade` to update from PyPI
+- **Shell completion**: `huly --install-completion`
 
 ## Prerequisites
 
@@ -55,53 +40,32 @@ If you run `huly issues list --project MY-WS`, it will fail because `MY-WS` is n
 
 ### Option 1: Install from PyPI
 
-Use this if you only want the CLI and are not modifying the source.
-
 The package name is `huly-cli`. The executable is `huly`.
 
 #### Recommended: `pipx` (standalone CLI install)
 
-[`pipx`](https://pipx.pypa.io/) is the recommended installer for standalone
-Python CLI tools. It creates an isolated environment per tool, puts the
-executable on `PATH` automatically, and works out of the box on PEP 668
-environments (including modern macOS with Homebrew-managed Python, where bare
-`pip install` is blocked with `externally-managed-environment`).
+[`pipx`](https://pipx.pypa.io/) creates an isolated environment per tool and
+puts the executable on `PATH` automatically.
 
 ```bash
 pipx install huly-cli
 huly --help
 ```
 
-Upgrade an existing install:
+Upgrade:
 
 ```bash
 pipx upgrade huly-cli
+# or: huly upgrade
 ```
 
 #### Alternative: `pip` (virtualenv or CI)
 
-Use `pip` if you are installing into an existing virtualenv or a controlled
-CI environment:
-
 ```bash
 pip install huly-cli
-huly --help
 ```
-
-Upgrade an existing install:
-
-```bash
-pip install --upgrade huly-cli
-```
-
-If `huly` is not found after a user-site `pip install`, the install
-directory may not be on your `PATH` (e.g. `~/.local/bin` on macOS/Linux or
-`%APPDATA%\Python\PythonXY\Scripts` on Windows). Either add that directory
-to `PATH`, or switch to `pipx`, which handles `PATH` automatically.
 
 ### Option 2: Use from a source checkout
-
-Use this if you are developing in this repository:
 
 1. Install dependencies, including dev tools:
 
@@ -120,16 +84,13 @@ cp .env.example .env
 - `HULY_URL`
 - `HULY_WORKSPACE`
 
-4. Choose one auth approach:
-
-- Interactive login: preferred for local use
-- Environment-based login: useful for non-interactive runs and token refresh
+4. Run commands with `uv run huly` instead of `huly`.
 
 ## Environment Variables
 
 The CLI loads config in this order:
 
-1. CLI flags
+1. CLI flags (`--url`, `--workspace`)
 2. Environment variables
 3. `.env` in the current directory
 4. `~/.config/huly/config.toml`
@@ -146,35 +107,26 @@ Auth cache location:
 - Config: `~/.config/huly/config.toml`
 - Tokens: `~/.config/huly/auth.json`
 
-The token cache is reused automatically. If the cached token expires, the CLI needs
-`HULY_EMAIL` and `HULY_PASSWORD` available in order to re-authenticate automatically.
+The token cache is reused automatically. If the cached token expires, the CLI
+needs `HULY_EMAIL` and `HULY_PASSWORD` available to re-authenticate.
 
-## Login Walkthrough
+## Login
 
 > **Source checkout?** Replace `huly` below with `uv run huly`.
 
-### Option 1: Interactive login
-
-This is the simplest flow if you are testing locally and do not want to keep your password
-in `.env`.
+### Interactive login
 
 ```bash
 huly --url https://huly.example.com --workspace my-ws auth login
 ```
 
-You will be prompted for:
-
-- Email
-- Password
-- Workspace slug, if it was not passed on the command line or set in `.env`
-
-Then confirm auth is valid:
+You will be prompted for email and password. Then confirm:
 
 ```bash
 huly auth status
 ```
 
-### Option 2: Login using `.env`
+### Login using `.env`
 
 Put all four values in `.env`:
 
@@ -192,175 +144,140 @@ huly auth login
 huly auth status
 ```
 
-## Agent Skill
+## Usage Examples
 
-This repo includes a Codex skill for agents that need to install or operate the
-CLI:
-
-- skill path: `skills/huly-cli`
-- explicit invocation: `$huly-cli`
-
-If you want to install that skill into a Codex skills directory outside this
-repo, copy or symlink it into `${CODEX_HOME:-$HOME/.codex}/skills`:
-
-```bash
-mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
-ln -s "$(pwd)/skills/huly-cli" "${CODEX_HOME:-$HOME/.codex}/skills/huly-cli"
-```
-
-If you prefer a copy instead of a symlink:
-
-```bash
-mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
-cp -R skills/huly-cli "${CODEX_HOME:-$HOME/.codex}/skills/"
-```
-
-## Hands-On Smoke Test
-
-> **Source checkout?** Replace `huly` below with `uv run huly`.
-> The repo also has an automated smoke runner: `uv run python scripts/live_smoke.py`
-> (add `--allow-writes` for CRUD checks with automatic cleanup).
-
-1. Confirm auth:
-
-```bash
-huly auth status
-```
-
-2. List projects:
+### Projects
 
 ```bash
 huly projects list
-```
-
-3. Inspect a project:
-
-```bash
 huly projects get DEMO
 ```
 
-4. List a few issues from that project:
+### Issues
 
 ```bash
-huly issues list --project DEMO --limit 5
-```
+# List and filter
+huly issues list --project DEMO --limit 10
+huly issues list --status backlog --assignee john
 
-5. Inspect one issue:
+# Create
+huly issues create --project DEMO --title "Fix login bug" \
+  --priority high --status todo --assignee "Jane" \
+  --due-date 2025-06-01 --component "Auth" --label "bug"
 
-```bash
-huly issues get DEMO-1
-```
+# Update
+huly issues update DEMO-1 --status done --priority low
+huly issues update DEMO-1 --due-date 2025-07-01 --component "API"
+huly issues update DEMO-1 --label "sprint-3"
 
-6. Read the issue description:
-
-```bash
+# Read/write descriptions
 huly issues describe DEMO-1
+huly issues describe DEMO-1 --set "## Updated description"
+huly issues describe DEMO-1 --set-file ./description.md
+huly issues describe DEMO-1 --raw  # show ProseMirror JSON
+
+# Delete
+huly issues delete DEMO-1
 ```
 
-7. List project components:
+### Documents
 
 ```bash
-huly components list --project DEMO --limit 5
+huly documents list --space "Engineering"
+huly documents create --space "Engineering" --title "Design Doc"
+huly documents describe DOC_ID --set "# Design\n\nContent here."
+huly documents describe DOC_ID --set-file ./doc.md
+huly documents update DOC_ID --title "Updated Title"
+huly documents delete DOC_ID
 ```
 
-8. Inspect a component by internal ID:
+### Components
 
 ```bash
-huly components get COMPONENT_ID
+huly components list --project DEMO
+huly components create --project DEMO --label "Auth Service" --description "Handles auth"
+huly components update COMP_ID --label "Renamed" --description "Updated"
+huly components delete COMP_ID
 ```
 
-9. List a few documents:
+### Milestones
 
 ```bash
-huly documents list --limit 5
+huly milestones list --project DEMO
+huly milestones create --project DEMO --label "v1.0" --status planned --target-date 2025-06-01
+huly milestones update MS_ID --status completed
+huly milestones delete MS_ID
 ```
 
-10. List issue templates:
+### Labels
 
 ```bash
-huly templates list --limit 5
+huly labels list
+huly labels create --title "bug" --color 1
+huly labels update LABEL_ID --title "critical-bug"
+huly labels delete LABEL_ID
 ```
 
-11. Verify status filtering:
+### Templates
 
 ```bash
-huly issues list --status backlog --limit 5
+huly templates list --project DEMO
+huly templates get TEMPLATE_ID
+huly templates describe TEMPLATE_ID
+huly templates describe TEMPLATE_ID --set "## Template description"
 ```
 
-12. List workspace members:
+### Members
 
 ```bash
 huly members list
 ```
 
-13. List labels:
-
-```bash
-huly labels list
-```
-
 ### JSON mode
-
-If you want machine-readable output for quick inspection:
 
 ```bash
 huly --json projects list
 huly --json issues list --project DEMO --limit 5
-huly --json auth status
+huly --json issues describe DEMO-1
 ```
 
-## Commands That Currently Need Caution
+## Smoke Testing
 
-The CLI write paths were exercised live during verification, but you should still
-prefer a disposable project or disposable teamspace when doing release-time smoke
-tests against a real workspace.
+The repo includes an automated smoke runner:
+
+```bash
+uv run python scripts/live_smoke.py                  # read-only checks
+uv run python scripts/live_smoke.py --allow-writes    # CRUD checks with cleanup
+```
 
 ## Local Test Suite
-
-Run the unit and CLI regression tests with:
 
 ```bash
 uv run --extra dev pytest -q
 ```
 
-Expected result at the time of verification:
-
-- `155 passed`
-
-## Packaging And PyPI
+## Packaging and PyPI
 
 The package is published on PyPI as `huly-cli`.
-
-Install it with `pipx` (recommended for end-users):
 
 ```bash
 pipx install huly-cli
 ```
 
-Or with `pip` (for virtualenvs or CI):
+Or with `pip` in a virtualenv or CI:
 
 ```bash
 pip install huly-cli
 ```
 
-The repo also builds a wheel and sdist cleanly and CI validates the
-distribution metadata.
-
-For the maintainer release checklist and publisher configuration notes, see
-[RELEASE.md](RELEASE.md).
+For the maintainer release checklist, see [RELEASE.md](RELEASE.md).
 
 ## CLI Help
 
-Top-level help:
-
 ```bash
 huly --help
-```
-
-Auth help:
-
-```bash
-huly auth login --help
+huly issues --help
+huly issues create --help
 ```
 
 ## License

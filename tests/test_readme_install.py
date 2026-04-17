@@ -69,7 +69,7 @@ def test_pipx_upgrade_command_documented() -> None:
 def test_packaging_section_leads_with_pipx() -> None:
     """The 'Packaging And PyPI' section at the bottom should also lead with pipx."""
     text = _read_readme()
-    marker = "## Packaging And PyPI"
+    marker = "## Packaging and PyPI"
     start = text.find(marker)
     assert start != -1, "README is missing the 'Packaging And PyPI' section"
 
