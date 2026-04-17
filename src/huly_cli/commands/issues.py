@@ -10,8 +10,8 @@ from typing import Annotated, Any
 import typer
 
 from huly_cli.auth import ensure_auth
-from huly_cli.commands.milestones import _parse_date_ms
 from huly_cli.client import HulyClient
+from huly_cli.commands.milestones import _parse_date_ms
 from huly_cli.config import load_config
 from huly_cli.errors import AuthError, HulyError, NotFoundError
 from huly_cli.issue_utils import (

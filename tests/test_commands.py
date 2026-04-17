@@ -482,7 +482,6 @@ def _issue_create_find_side_effects(*, extra_finds=None):
     Order: project lookup, issues-for-rank.
     extra_finds are inserted after project lookup (before rank).
     """
-    effects = list(PROJECT_DATA)  # single-element list for project
     result = [PROJECT_DATA]
     if extra_finds:
         result.extend(extra_finds)
