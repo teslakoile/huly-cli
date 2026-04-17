@@ -357,9 +357,7 @@ def docs_describe(
                         warn_on_error=False,
                     )
                     if blob_ref is None:
-                        raise HulyError(
-                            "Failed to create content via Collaborator."
-                        )
+                        raise HulyError("Failed to create content via Collaborator.")
                     await client.tx(
                         {
                             "_class": "core:class:TxUpdateDoc",

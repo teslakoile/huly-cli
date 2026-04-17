@@ -385,7 +385,16 @@ def test_issues_create_errors_when_collaborator_unavailable(fake_auth):
     ):
         result = runner.invoke(
             app,
-            ["issues", "create", "--title", "Test", "--project", "DEMO", "--description", "# Heading"],
+            [
+                "issues",
+                "create",
+                "--title",
+                "Test",
+                "--project",
+                "DEMO",
+                "--description",
+                "# Heading",
+            ],
         )
 
     assert result.exit_code == 1, result.output
@@ -662,7 +671,12 @@ def test_issues_list_status_unknown_in_live_index_raises(fake_auth):
 
 def test_issues_get_handles_dict_description(fake_auth):
     """Regression for #30: issues get must not crash on inline ProseMirror dict."""
-    raw = _raw_issue(description={"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "hello"}]}]})
+    raw = _raw_issue(
+        description={
+            "type": "doc",
+            "content": [{"type": "paragraph", "content": [{"type": "text", "text": "hello"}]}],
+        }
+    )
 
     with (
         patch("huly_cli.commands.issues.ensure_auth", new=AsyncMock(return_value=fake_auth)),
@@ -678,7 +692,12 @@ def test_issues_get_handles_dict_description(fake_auth):
 
 def test_issues_describe_reads_dict_description(fake_auth):
     """Regression for #30: issues describe must handle inline ProseMirror dict."""
-    raw = _raw_issue(description={"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "hello"}]}]})
+    raw = _raw_issue(
+        description={
+            "type": "doc",
+            "content": [{"type": "paragraph", "content": [{"type": "text", "text": "hello"}]}],
+        }
+    )
 
     with (
         patch("huly_cli.commands.issues.ensure_auth", new=AsyncMock(return_value=fake_auth)),

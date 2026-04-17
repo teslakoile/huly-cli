@@ -618,9 +618,7 @@ def issues_describe(
                         issue.id, markup, warn_on_error=False
                     )
                     if blob_ref is None:
-                        raise HulyError(
-                            "Failed to create description via Collaborator."
-                        )
+                        raise HulyError("Failed to create description via Collaborator.")
                     await client.tx(
                         {
                             "_class": "core:class:TxUpdateDoc",
