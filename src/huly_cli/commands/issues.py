@@ -11,6 +11,7 @@ import typer
 
 from huly_cli.auth import ensure_auth
 from huly_cli.client import HulyClient
+from huly_cli.commands.milestones import _parse_date_ms
 from huly_cli.config import load_config
 from huly_cli.errors import AuthError, HulyError, NotFoundError
 from huly_cli.issue_utils import (
@@ -122,6 +123,55 @@ def _resolve_priority_value(priority: str) -> int:
             valid = ", ".join(PRIORITY_FROM_NAME.keys())
             raise HulyError(f"Unknown priority '{priority}'. Valid values: {valid}") from None
         return priority_int
+
+
+async def _resolve_component(
+    client: HulyClient, name_or_id: str, project_id: str | None = None
+) -> str:
+    """Resolve a component name (fuzzy) or ID to its internal ID."""
+    query: dict[str, Any] = {}
+    if project_id:
+        query["space"] = project_id
+    raw = await client.find_all("tracker:class:Component", query=query, options={"limit": 500})
+    for doc in raw:
+        if doc.get("_id") == name_or_id:
+            return doc["_id"]
+    needle = name_or_id.lower()
+    for doc in raw:
+        if needle in (doc.get("label") or "").lower():
+            return doc["_id"]
+    raise NotFoundError(f"Component '{name_or_id}' not found.")
+
+
+async def _resolve_label_tag(client: HulyClient, title: str) -> str | None:
+    """Find the tag value for a label by title."""
+    raw = await client.find_all("tags:class:TagReference", options={"limit": 1000})
+    needle = title.lower()
+    for doc in raw:
+        if (doc.get("title") or "").lower() == needle:
+            return doc.get("tag")
+    return None
+
+
+async def _attach_label(
+    client: HulyClient, issue_id: str, space: str, title: str, tag: str | None = None
+) -> str:
+    """Create a TagReference document attaching a label to an issue."""
+    new_id = secrets.token_hex(12)
+    await client.tx(
+        {
+            "_class": "core:class:TxCreateDoc",
+            "objectClass": "tags:class:TagReference",
+            "objectSpace": space,
+            "objectId": new_id,
+            "attributes": {
+                "tag": tag or "",
+                "title": title,
+                "attachedTo": issue_id,
+            },
+        }
+    )
+    return new_id
 
 
 async def _resolve_issue_status_id(
@@ -381,6 +431,15 @@ def issues_create(
     description: Annotated[
         str | None, typer.Option("--description", help="Markdown description text.")
     ] = None,
+    due_date: Annotated[
+        str | None, typer.Option("--due-date", help="Due date (YYYY-MM-DD).")
+    ] = None,
+    component: Annotated[
+        str | None, typer.Option("--component", help="Component name or ID.")
+    ] = None,
+    label: Annotated[
+        list[str] | None, typer.Option("--label", help="Label to attach (repeatable).")
+    ] = None,
 ) -> None:
     """Create a new issue."""
     overrides: dict = ctx.obj or {}
@@ -390,7 +449,18 @@ def issues_create(
     )
     try:
         result = asyncio.run(
-            _create_impl(config, title, project, status, priority, assignee, description)
+            _create_impl(
+                config,
+                title,
+                project,
+                status,
+                priority,
+                assignee,
+                description,
+                due_date,
+                component,
+                label,
+            )
         )
         print_success(result)
     except NotFoundError as e:
@@ -409,6 +479,9 @@ async def _create_impl(
     priority: str,
     assignee: str | None,
     description: str | None,
+    due_date: str | None = None,
+    component: str | None = None,
+    labels: list[str] | None = None,
 ) -> str:
     auth = await ensure_auth(config)
     async with HulyClient(config, auth) as client:
@@ -420,6 +493,18 @@ async def _create_impl(
         )
         priority_int = _resolve_priority_value(priority)
         person_id = await _resolve_person_by_name(client, assignee) if assignee else None
+
+        due_date_ms: int | None = None
+        if due_date:
+            try:
+                due_date_ms = _parse_date_ms(due_date)
+            except ValueError:
+                raise HulyError(f"Invalid date format '{due_date}'. Use YYYY-MM-DD.") from None
+
+        component_id = (
+            await _resolve_component(client, component, project_doc.id) if component else None
+        )
+
         new_id = secrets.token_hex(12)
         number, identifier_value, rank = await _next_issue_number_and_rank(client, project_doc)
 
@@ -435,7 +520,7 @@ async def _create_impl(
                 "priority": priority_int,
                 "assignee": person_id,
                 "kind": "tracker:taskTypes:Issue",
-                "component": None,
+                "component": component_id,
                 "milestone": None,
                 "number": number,
                 "estimation": 0,
@@ -447,7 +532,7 @@ async def _create_impl(
                 "attachedTo": "tracker:ids:NoParent",
                 "parents": [],
                 "childInfo": [],
-                "dueDate": None,
+                "dueDate": due_date_ms,
                 "rank": rank,
                 "comments": 0,
                 "subIssues": 0,
@@ -475,6 +560,11 @@ async def _create_impl(
                     "operations": {"description": description_ref},
                 }
             )
+        if labels:
+            for label_name in labels:
+                tag_ref = await _resolve_label_tag(client, label_name)
+                await _attach_label(client, new_id, project_doc.id, label_name, tag_ref)
+
         return (
             f"Issue {identifier_value} created in project {project_doc.identifier} (id: {new_id})"
         )
@@ -495,6 +585,15 @@ def issues_update(
             "--assignee", help='New assignee person name (fuzzy match). Use "" to unassign.'
         ),
     ] = None,
+    due_date: Annotated[
+        str | None, typer.Option("--due-date", help='Due date (YYYY-MM-DD). Use "" to clear.')
+    ] = None,
+    component: Annotated[
+        str | None, typer.Option("--component", help='Component name or ID. Use "" to unset.')
+    ] = None,
+    label: Annotated[
+        list[str] | None, typer.Option("--label", help="Label to attach (repeatable).")
+    ] = None,
 ) -> None:
     """Update an existing issue."""
     overrides: dict = ctx.obj or {}
@@ -503,7 +602,11 @@ def issues_update(
         workspace_override=overrides.get("workspace"),
     )
     try:
-        asyncio.run(_update_impl(config, identifier, title, status, priority, assignee))
+        asyncio.run(
+            _update_impl(
+                config, identifier, title, status, priority, assignee, due_date, component, label
+            )
+        )
         print_success(f"Issue {identifier} updated.")
     except NotFoundError as e:
         print_error(e.message)
@@ -520,6 +623,9 @@ async def _update_impl(
     status: str | None,
     priority: str | None,
     assignee: str | None,
+    due_date: str | None = None,
+    component: str | None = None,
+    labels: list[str] | None = None,
 ) -> None:
     auth = await ensure_auth(config)
     async with HulyClient(config, auth) as client:
@@ -542,21 +648,42 @@ async def _update_impl(
             else:
                 operations["assignee"] = await _resolve_person_by_name(client, assignee)
 
-        if not operations:
+        if due_date is not None:
+            if due_date == "":
+                operations["dueDate"] = None
+            else:
+                try:
+                    operations["dueDate"] = _parse_date_ms(due_date)
+                except ValueError:
+                    raise HulyError(f"Invalid date format '{due_date}'. Use YYYY-MM-DD.") from None
+
+        if component is not None:
+            if component == "":
+                operations["component"] = None
+            else:
+                operations["component"] = await _resolve_component(client, component)
+
+        if labels:
+            for label_name in labels:
+                tag_ref = await _resolve_label_tag(client, label_name)
+                await _attach_label(client, issue.id, issue.space, label_name, tag_ref)
+
+        if not operations and not labels:
             print_warning(
-                "No fields to update — provide at least one of --title, --status, --priority, --assignee."
+                "No fields to update — provide at least one of --title, --status, --priority, --assignee, --due-date, --component, --label."
             )
             return
 
-        transaction = {
-            "_class": "core:class:TxUpdateDoc",
-            "objectClass": "tracker:class:Issue",
-            "objectSpace": issue.space,
-            "objectId": issue.id,
-            "operations": operations,
-        }
+        if operations:
+            transaction = {
+                "_class": "core:class:TxUpdateDoc",
+                "objectClass": "tracker:class:Issue",
+                "objectSpace": issue.space,
+                "objectId": issue.id,
+                "operations": operations,
+            }
 
-        await client.tx(transaction)
+            await client.tx(transaction)
 
 
 @app.command("describe")

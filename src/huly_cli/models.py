@@ -114,9 +114,16 @@ class PersonAccount(BaseModel):
 class TagReference(BaseModel):
     model_config = {"populate_by_name": True}
 
+    id: str = Field(alias="_id")
     tag: str | None = None
     title: str | None = None
+    color: int | None = None
     attached_to: str = Field("", alias="attachedTo")
+    space: str = ""
+    created_by: str = Field("", alias="createdBy")
+    created_on: int = Field(0, alias="createdOn")
+    modified_by: str = Field("", alias="modifiedBy")
+    modified_on: int = Field(0, alias="modifiedOn")
 
 
 # ── Document / Teamspace ──────────────────────────────────────────────────────

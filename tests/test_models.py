@@ -227,28 +227,51 @@ class TestPersonAccount:
 class TestTagReference:
     def test_tag_reference_from_api(self):
         raw = {"_id": "t1", "tag": "tag-id", "title": "Sprint 1", "attachedTo": "issue1"}
-        # TagReference does not have _id in current model — it uses tag/title/attachedTo
         tag = TagReference.model_validate(raw)
+        assert tag.id == "t1"
         assert tag.tag == "tag-id"
         assert tag.title == "Sprint 1"
         assert tag.attached_to == "issue1"
 
     def test_tag_reference_defaults(self):
-        raw = {"tag": "t", "title": "Label"}
+        raw = {"_id": "t2", "tag": "t", "title": "Label"}
         tag = TagReference.model_validate(raw)
         assert tag.attached_to == ""
+        assert tag.space == ""
+        assert tag.color is None
+        assert tag.created_on == 0
 
     def test_tag_reference_accepts_null_tag(self):
         """Regression test for issue #16: API may return null for tag."""
-        raw = {"tag": None, "title": "Label"}
+        raw = {"_id": "t3", "tag": None, "title": "Label"}
         tag = TagReference.model_validate(raw)
         assert tag.tag is None
 
     def test_tag_reference_accepts_null_title(self):
         """Regression test for issue #16: API may return null for title."""
-        raw = {"tag": "t", "title": None}
+        raw = {"_id": "t4", "tag": "t", "title": None}
         tag = TagReference.model_validate(raw)
         assert tag.title is None
+
+    def test_tag_reference_full_fields(self):
+        raw = {
+            "_id": "t5",
+            "tag": "tag-id",
+            "title": "Bug",
+            "color": 9,
+            "attachedTo": "issue99",
+            "space": "proj-1",
+            "createdBy": "user1",
+            "createdOn": 1700000000000,
+            "modifiedBy": "user2",
+            "modifiedOn": 1700000001000,
+        }
+        tag = TagReference.model_validate(raw)
+        assert tag.id == "t5"
+        assert tag.color == 9
+        assert tag.space == "proj-1"
+        assert tag.created_by == "user1"
+        assert tag.modified_on == 1700000001000
 
 
 # ── Dict constants ─────────────────────────────────────────────────────────────
