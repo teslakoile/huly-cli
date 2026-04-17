@@ -141,9 +141,7 @@ def labels_create(
     project: Annotated[
         str, typer.Option("--project", help='Project identifier (e.g. "DEMO").')
     ] = ...,
-    color: Annotated[
-        int | None, typer.Option("--color", help="Label color (integer).")
-    ] = None,
+    color: Annotated[int | None, typer.Option("--color", help="Label color (integer).")] = None,
 ) -> None:
     """Create a new label."""
     overrides: dict = ctx.obj or {}
@@ -226,9 +224,7 @@ def labels_update(
                 operations["color"] = color
 
             if not operations:
-                print_warning(
-                    "No fields to update — provide at least one of --title, --color."
-                )
+                print_warning("No fields to update — provide at least one of --title, --color.")
                 return
 
             transaction = {

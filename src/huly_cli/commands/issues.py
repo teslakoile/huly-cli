@@ -122,7 +122,9 @@ def _resolve_priority_value(priority: str) -> int:
         return priority_int
 
 
-async def _resolve_component(client: HulyClient, name_or_id: str, project_id: str | None = None) -> str:
+async def _resolve_component(
+    client: HulyClient, name_or_id: str, project_id: str | None = None
+) -> str:
     """Resolve a component name (fuzzy) or ID to its internal ID."""
     query: dict[str, Any] = {}
     if project_id:
@@ -148,20 +150,24 @@ async def _resolve_label_tag(client: HulyClient, title: str) -> str | None:
     return None
 
 
-async def _attach_label(client: HulyClient, issue_id: str, space: str, title: str, tag: str | None = None) -> str:
+async def _attach_label(
+    client: HulyClient, issue_id: str, space: str, title: str, tag: str | None = None
+) -> str:
     """Create a TagReference document attaching a label to an issue."""
     new_id = secrets.token_hex(12)
-    await client.tx({
-        "_class": "core:class:TxCreateDoc",
-        "objectClass": "tags:class:TagReference",
-        "objectSpace": space,
-        "objectId": new_id,
-        "attributes": {
-            "tag": tag or "",
-            "title": title,
-            "attachedTo": issue_id,
-        },
-    })
+    await client.tx(
+        {
+            "_class": "core:class:TxCreateDoc",
+            "objectClass": "tags:class:TagReference",
+            "objectSpace": space,
+            "objectId": new_id,
+            "attributes": {
+                "tag": tag or "",
+                "title": title,
+                "attachedTo": issue_id,
+            },
+        }
+    )
     return new_id
 
 
@@ -422,9 +428,15 @@ def issues_create(
     description: Annotated[
         str | None, typer.Option("--description", help="Markdown description text.")
     ] = None,
-    due_date: Annotated[str | None, typer.Option("--due-date", help="Due date (YYYY-MM-DD).")] = None,
-    component: Annotated[str | None, typer.Option("--component", help="Component name or ID.")] = None,
-    label: Annotated[list[str] | None, typer.Option("--label", help="Label to attach (repeatable).")] = None,
+    due_date: Annotated[
+        str | None, typer.Option("--due-date", help="Due date (YYYY-MM-DD).")
+    ] = None,
+    component: Annotated[
+        str | None, typer.Option("--component", help="Component name or ID.")
+    ] = None,
+    label: Annotated[
+        list[str] | None, typer.Option("--label", help="Label to attach (repeatable).")
+    ] = None,
 ) -> None:
     """Create a new issue."""
     overrides: dict = ctx.obj or {}
@@ -434,7 +446,18 @@ def issues_create(
     )
     try:
         result = asyncio.run(
-            _create_impl(config, title, project, status, priority, assignee, description, due_date, component, label)
+            _create_impl(
+                config,
+                title,
+                project,
+                status,
+                priority,
+                assignee,
+                description,
+                due_date,
+                component,
+                label,
+            )
         )
         print_success(result)
     except NotFoundError as e:
@@ -475,7 +498,9 @@ async def _create_impl(
             except ValueError:
                 raise HulyError(f"Invalid date format '{due_date}'. Use YYYY-MM-DD.") from None
 
-        component_id = await _resolve_component(client, component, project_doc.id) if component else None
+        component_id = (
+            await _resolve_component(client, component, project_doc.id) if component else None
+        )
 
         new_id = secrets.token_hex(12)
         number, identifier_value, rank = await _next_issue_number_and_rank(client, project_doc)
@@ -552,9 +577,15 @@ def issues_update(
             "--assignee", help='New assignee person name (fuzzy match). Use "" to unassign.'
         ),
     ] = None,
-    due_date: Annotated[str | None, typer.Option("--due-date", help='Due date (YYYY-MM-DD). Use "" to clear.')] = None,
-    component: Annotated[str | None, typer.Option("--component", help='Component name or ID. Use "" to unset.')] = None,
-    label: Annotated[list[str] | None, typer.Option("--label", help="Label to attach (repeatable).")] = None,
+    due_date: Annotated[
+        str | None, typer.Option("--due-date", help='Due date (YYYY-MM-DD). Use "" to clear.')
+    ] = None,
+    component: Annotated[
+        str | None, typer.Option("--component", help='Component name or ID. Use "" to unset.')
+    ] = None,
+    label: Annotated[
+        list[str] | None, typer.Option("--label", help="Label to attach (repeatable).")
+    ] = None,
 ) -> None:
     """Update an existing issue."""
     overrides: dict = ctx.obj or {}
@@ -563,7 +594,11 @@ def issues_update(
         workspace_override=overrides.get("workspace"),
     )
     try:
-        asyncio.run(_update_impl(config, identifier, title, status, priority, assignee, due_date, component, label))
+        asyncio.run(
+            _update_impl(
+                config, identifier, title, status, priority, assignee, due_date, component, label
+            )
+        )
         print_success(f"Issue {identifier} updated.")
     except NotFoundError as e:
         print_error(e.message)

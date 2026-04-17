@@ -363,9 +363,7 @@ def test_labels_create_writes_create_doc_tx():
         patch("huly_cli.client.HulyClient.find_all", find_mock),
         patch("huly_cli.client.HulyClient.tx", tx_mock),
     ):
-        result = runner.invoke(
-            app, ["labels", "create", "--title", "Bug", "--project", "TP"]
-        )
+        result = runner.invoke(app, ["labels", "create", "--title", "Bug", "--project", "TP"])
 
     assert result.exit_code == 0, result.output
     create_tx = tx_mock.await_args.args[0]
@@ -382,9 +380,7 @@ def test_labels_create_project_not_found_exits_nonzero():
         patch("huly_cli.client.HulyClient.find_all", find_mock),
         patch("huly_cli.client.HulyClient.tx", tx_mock),
     ):
-        result = runner.invoke(
-            app, ["labels", "create", "--title", "Bug", "--project", "MISSING"]
-        )
+        result = runner.invoke(app, ["labels", "create", "--title", "Bug", "--project", "MISSING"])
 
     assert result.exit_code == 1
     tx_mock.assert_not_awaited()
@@ -398,9 +394,7 @@ def test_labels_update_writes_update_doc_tx():
         patch("huly_cli.client.HulyClient.find_all", new=AsyncMock(return_value=TAG_DETAIL_DATA)),
         patch("huly_cli.client.HulyClient.tx", tx_mock),
     ):
-        result = runner.invoke(
-            app, ["labels", "update", "t1", "--title", "Feature"]
-        )
+        result = runner.invoke(app, ["labels", "update", "t1", "--title", "Feature"])
 
     assert result.exit_code == 0, result.output
     update_tx = tx_mock.await_args.args[0]
@@ -432,9 +426,7 @@ def test_labels_update_not_found_exits_nonzero():
         patch("huly_cli.client.HulyClient.find_all", find_mock),
         patch("huly_cli.client.HulyClient.tx", tx_mock),
     ):
-        result = runner.invoke(
-            app, ["labels", "update", "missing-id", "--title", "X"]
-        )
+        result = runner.invoke(app, ["labels", "update", "missing-id", "--title", "X"])
 
     assert result.exit_code == 1
     tx_mock.assert_not_awaited()
@@ -492,10 +484,12 @@ def _issue_create_find_side_effects(*, extra_finds=None):
 
 def test_issues_create_with_due_date():
     find_mock = AsyncMock(side_effect=_issue_create_find_side_effects())
-    tx_mock = AsyncMock(side_effect=[
-        {"object": {"sequence": 5}},  # sequence increment
-        {},  # issue create
-    ])
+    tx_mock = AsyncMock(
+        side_effect=[
+            {"object": {"sequence": 5}},  # sequence increment
+            {},  # issue create
+        ]
+    )
 
     with (
         _auth_patch(),
@@ -515,13 +509,13 @@ def test_issues_create_with_due_date():
 
 def test_issues_create_with_component():
     component_find = [{"_id": "comp1", "label": "Auth Service", "space": "proj1"}]
-    find_mock = AsyncMock(
-        side_effect=_issue_create_find_side_effects(extra_finds=[component_find])
+    find_mock = AsyncMock(side_effect=_issue_create_find_side_effects(extra_finds=[component_find]))
+    tx_mock = AsyncMock(
+        side_effect=[
+            {"object": {"sequence": 5}},
+            {},
+        ]
     )
-    tx_mock = AsyncMock(side_effect=[
-        {"object": {"sequence": 5}},
-        {},
-    ])
 
     with (
         _auth_patch(),
@@ -530,7 +524,16 @@ def test_issues_create_with_component():
     ):
         result = runner.invoke(
             app,
-            ["issues", "create", "--title", "Test", "--project", "TP", "--component", "Auth Service"],
+            [
+                "issues",
+                "create",
+                "--title",
+                "Test",
+                "--project",
+                "TP",
+                "--component",
+                "Auth Service",
+            ],
         )
 
     assert result.exit_code == 0, result.output
@@ -548,11 +551,13 @@ def test_issues_create_with_label():
             label_find,  # _resolve_label_tag
         ]
     )
-    tx_mock = AsyncMock(side_effect=[
-        {"object": {"sequence": 5}},  # sequence increment
-        {},  # issue create
-        {},  # tag attach
-    ])
+    tx_mock = AsyncMock(
+        side_effect=[
+            {"object": {"sequence": 5}},  # sequence increment
+            {},  # issue create
+            {},  # tag attach
+        ]
+    )
 
     with (
         _auth_patch(),
@@ -584,9 +589,7 @@ def test_issues_update_with_due_date():
         patch("huly_cli.client.HulyClient.find_all", find_mock),
         patch("huly_cli.client.HulyClient.tx", tx_mock),
     ):
-        result = runner.invoke(
-            app, ["issues", "update", "TP-1", "--due-date", "2024-06-15"]
-        )
+        result = runner.invoke(app, ["issues", "update", "TP-1", "--due-date", "2024-06-15"])
 
     assert result.exit_code == 0, result.output
     update_tx = tx_mock.await_args.args[0]
@@ -602,9 +605,7 @@ def test_issues_update_clear_due_date():
         patch("huly_cli.client.HulyClient.find_all", find_mock),
         patch("huly_cli.client.HulyClient.tx", tx_mock),
     ):
-        result = runner.invoke(
-            app, ["issues", "update", "TP-1", "--due-date", ""]
-        )
+        result = runner.invoke(app, ["issues", "update", "TP-1", "--due-date", ""])
 
     assert result.exit_code == 0, result.output
     update_tx = tx_mock.await_args.args[0]
@@ -621,9 +622,7 @@ def test_issues_update_with_component():
         patch("huly_cli.client.HulyClient.find_all", find_mock),
         patch("huly_cli.client.HulyClient.tx", tx_mock),
     ):
-        result = runner.invoke(
-            app, ["issues", "update", "TP-1", "--component", "Auth Service"]
-        )
+        result = runner.invoke(app, ["issues", "update", "TP-1", "--component", "Auth Service"])
 
     assert result.exit_code == 0, result.output
     update_tx = tx_mock.await_args.args[0]
@@ -639,9 +638,7 @@ def test_issues_update_clear_component():
         patch("huly_cli.client.HulyClient.find_all", find_mock),
         patch("huly_cli.client.HulyClient.tx", tx_mock),
     ):
-        result = runner.invoke(
-            app, ["issues", "update", "TP-1", "--component", ""]
-        )
+        result = runner.invoke(app, ["issues", "update", "TP-1", "--component", ""])
 
     assert result.exit_code == 0, result.output
     update_tx = tx_mock.await_args.args[0]
@@ -651,19 +648,19 @@ def test_issues_update_clear_component():
 def test_issues_update_with_label():
     label_find = [{"_id": "tr1", "tag": "tag-bug", "title": "Bug", "attachedTo": "other"}]
     find_mock = AsyncMock(side_effect=[ISSUE_DATA, label_find])
-    tx_mock = AsyncMock(side_effect=[
-        {},  # tag attach
-        {},  # (no update tx since only labels, no operations)
-    ])
+    tx_mock = AsyncMock(
+        side_effect=[
+            {},  # tag attach
+            {},  # (no update tx since only labels, no operations)
+        ]
+    )
 
     with (
         _auth_patch(),
         patch("huly_cli.client.HulyClient.find_all", find_mock),
         patch("huly_cli.client.HulyClient.tx", tx_mock),
     ):
-        result = runner.invoke(
-            app, ["issues", "update", "TP-1", "--label", "Bug"]
-        )
+        result = runner.invoke(app, ["issues", "update", "TP-1", "--label", "Bug"])
 
     assert result.exit_code == 0, result.output
     # First tx call is the tag attachment
