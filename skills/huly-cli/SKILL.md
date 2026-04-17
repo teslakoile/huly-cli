@@ -25,12 +25,12 @@ Use this skill for:
 Check whether the executable is already present before giving install steps:
 
 ```bash
-huly --help
+huly --version
 ```
 
 Interpretation:
 
-- if `huly --help` works, the installed-package flow is available
+- if `huly --version` works, the installed-package flow is available
 - if `huly` is missing but the user is inside this repository, prefer
   `uv run huly ...`
 - if neither is available, install `huly-cli` from PyPI or set up the repo
@@ -40,8 +40,14 @@ Interpretation:
 If the user only wants to use the CLI, prefer the published package:
 
 ```bash
-pip install huly-cli
+pipx install huly-cli
 huly --help
+```
+
+If `pipx` is not available:
+
+```bash
+pip install huly-cli
 ```
 
 If `huly` is not found after installing, the install directory may not be on
@@ -138,27 +144,41 @@ Prefer `--json` when an agent needs stable machine-readable output.
 
 Current implemented command groups:
 
-- `auth`
-- `projects`
-- `issues`
-- `documents`
-- `components`
-- `milestones`
-- `templates`
-- `members`
-- `labels`
+- `auth` — login, status
+- `projects` — list, get
+- `issues` — list, get, create, update, delete, describe
+- `documents` — list, get, create, update, delete, describe
+- `components` — list, get, create, update, delete
+- `milestones` — list, get, create, update, delete
+- `templates` — list, get, describe (read/write)
+- `labels` — list, get, create, update, delete
+- `members` — list
+- `upgrade` — self-upgrade from PyPI
 
 Current live-validated CRUD coverage:
 
-- issues: create, get, describe, update, delete
-- documents: create, get, describe, update, delete
-- components: create, get, update, delete
-- milestones: create, get, update, delete
-- templates: list, get, describe, set description
+| Command      | list | get | create | update | delete | describe |
+|--------------|:----:|:---:|:------:|:------:|:------:|:--------:|
+| projects     |  x   |  x  |        |        |        |          |
+| issues       |  x   |  x  |   x    |   x    |   x    |    x     |
+| documents    |  x   |  x  |   x    |   x    |   x    |    x     |
+| components   |  x   |  x  |   x    |   x    |   x    |          |
+| milestones   |  x   |  x  |   x    |   x    |   x    |          |
+| templates    |  x   |  x  |        |        |        |    x     |
+| labels       |  x   |  x  |   x    |   x    |   x    |          |
+| members      |  x   |     |        |        |        |          |
+
+Issue-specific fields supported on create/update:
+
+- `--priority` — name or number
+- `--status` — name or id (resolves against live workspace index)
+- `--assignee` — fuzzy name match
+- `--due-date` — YYYY-MM-DD format (use "" to clear on update)
+- `--component` — name or ID (use "" to unset on update)
+- `--label` — repeatable flag to attach labels
+- `--description` — markdown text (create only)
 
 ### 5. Use repo facts when relevant
-
-This repo currently targets Huly platform `v0.6.504`.
 
 If operating from a clone of this repository:
 

@@ -5,27 +5,42 @@
 Try the executable first:
 
 ```bash
-huly --help
+huly --version
 ```
 
 If that fails and you are inside a source checkout, use:
 
 ```bash
-uv run huly --help
+uv run huly --version
 ```
 
 ## Install modes
 
-### PyPI install
+### PyPI install (recommended: pipx)
 
-Use when the user just needs the tool:
+```bash
+pipx install huly-cli
+huly --help
+```
+
+Upgrade:
+
+```bash
+pipx upgrade huly-cli
+# or from within the CLI:
+huly upgrade
+```
+
+### PyPI install (pip)
+
+Use when `pipx` is not available:
 
 ```bash
 pip install huly-cli
 huly --help
 ```
 
-Upgrade an existing PyPI install:
+Upgrade:
 
 ```bash
 pip install --upgrade huly-cli
@@ -117,20 +132,41 @@ huly projects get DEMO
 ### Issues
 
 ```bash
-huly issues list --project DEMO --limit 5
-huly issues get DEMO-1
-huly issues describe DEMO-1
-huly issues create --project DEMO --title "Example" --description "Example description"
+# List and filter
+huly issues list --project DEMO --limit 10
+huly issues list --status backlog --assignee john
+
+# Create with all options
+huly issues create --project DEMO --title "Fix login bug" \
+  --priority high --status todo --assignee "Jane" \
+  --due-date 2025-06-01 --component "Auth" --label "bug" \
+  --description "Detailed markdown description here"
+
+# Update
 huly issues update DEMO-1 --title "Updated title" --status done
+huly issues update DEMO-1 --due-date 2025-07-01 --component "API"
+huly issues update DEMO-1 --label "sprint-3"
+huly issues update DEMO-1 --assignee ""  # unassign
+huly issues update DEMO-1 --due-date ""  # clear due date
+huly issues update DEMO-1 --component "" # unset component
+
+# Read/write descriptions
+huly issues describe DEMO-1
+huly issues describe DEMO-1 --raw  # raw ProseMirror JSON
+huly issues describe DEMO-1 --set "## New description"
+huly issues describe DEMO-1 --set-file ./description.md
+
+# Delete
 huly issues delete DEMO-1
 ```
 
 ### Documents
 
 ```bash
-huly documents list --limit 5
-huly documents create --space "Engineering" --title "Example Doc"
-huly documents describe DOC_ID --set "Example content"
+huly documents list --space "Engineering" --limit 5
+huly documents create --space "Engineering" --title "Design Doc"
+huly documents describe DOC_ID --set "# Content here"
+huly documents describe DOC_ID --set-file ./doc.md
 huly documents update DOC_ID --title "Updated title"
 huly documents delete DOC_ID
 ```
@@ -139,8 +175,8 @@ huly documents delete DOC_ID
 
 ```bash
 huly components list --project DEMO --limit 5
-huly components create --project DEMO --label "Example Component"
-huly components update COMPONENT_ID --label "Updated Component"
+huly components create --project DEMO --label "Auth Service" --description "Handles auth"
+huly components update COMPONENT_ID --label "Renamed" --description "Updated"
 huly components delete COMPONENT_ID
 ```
 
@@ -148,9 +184,19 @@ huly components delete COMPONENT_ID
 
 ```bash
 huly milestones list --project DEMO --limit 5
-huly milestones create --project DEMO --label "Example Milestone" --status planned
+huly milestones create --project DEMO --label "v1.0" --status planned --target-date 2025-06-01
 huly milestones update MILESTONE_ID --status completed
 huly milestones delete MILESTONE_ID
+```
+
+### Labels
+
+```bash
+huly labels list
+huly labels get LABEL_ID
+huly labels create --title "bug" --color 1
+huly labels update LABEL_ID --title "critical-bug"
+huly labels delete LABEL_ID
 ```
 
 ### Templates
@@ -159,14 +205,13 @@ huly milestones delete MILESTONE_ID
 huly templates list --project DEMO --limit 5
 huly templates get TEMPLATE_ID
 huly templates describe TEMPLATE_ID
-huly templates describe TEMPLATE_ID --set "Updated description"
+huly templates describe TEMPLATE_ID --set "Updated template description"
 ```
 
-### Members and labels
+### Members
 
 ```bash
 huly members list
-huly labels list
 ```
 
 ## Output mode
@@ -176,6 +221,7 @@ Prefer JSON for agent workflows:
 ```bash
 huly --json projects list
 huly --json issues get DEMO-1
+huly --json issues describe DEMO-1
 ```
 
 ## Troubleshooting
@@ -185,3 +231,4 @@ huly --json issues get DEMO-1
 - Workspace slug is not the same thing as a project identifier
 - If cached auth expires, ensure `HULY_EMAIL` and `HULY_PASSWORD` are available
 - In this repo, prefer `uv run huly ...` over invoking `huly` directly
+- Use `huly upgrade` to self-update to the latest PyPI release
