@@ -385,3 +385,153 @@ class TestMarkdownToProsemirror:
         assert len(paras) >= 1
         texts = [c["text"] for c in paras[0]["content"] if c["type"] == "text"]
         assert "Hello world" in texts
+
+
+# ── Markdown → ProseMirror tables (#42) ──────────────────────────────────────
+
+
+class TestMarkdownTableParsing:
+    """GFM pipe tables should parse into ProseMirror `table` nodes."""
+
+    def _parse(self, md: str) -> dict:
+        return json.loads(markdown_to_prosemirror(md))
+
+    def test_basic_table_produces_table_node(self):
+        md = "| Category | Status |\n| --- | --- |\n| Schedule | Green |"
+        doc = self._parse(md)
+        tables = [n for n in doc["content"] if n["type"] == "table"]
+        assert len(tables) == 1, f"expected one table node, got {doc['content']}"
+
+    def test_first_row_is_header_body_rows_are_cells(self):
+        md = "| A | B |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |"
+        doc = self._parse(md)
+        table = next(n for n in doc["content"] if n["type"] == "table")
+        rows = table["content"]
+        assert len(rows) == 3  # 1 header + 2 body (alignment row consumed)
+        header_row = rows[0]
+        assert all(c["type"] == "tableHeader" for c in header_row["content"])
+        for body_row in rows[1:]:
+            assert all(c["type"] == "tableCell" for c in body_row["content"])
+
+    def test_cells_contain_paragraph_with_text(self):
+        md = "| Hello |\n| --- |\n| World |"
+        doc = self._parse(md)
+        table = next(n for n in doc["content"] if n["type"] == "table")
+        header_cell = table["content"][0]["content"][0]
+        assert header_cell["content"][0]["type"] == "paragraph"
+        assert header_cell["content"][0]["content"][0]["text"] == "Hello"
+        body_cell = table["content"][1]["content"][0]
+        assert body_cell["content"][0]["type"] == "paragraph"
+        assert body_cell["content"][0]["content"][0]["text"] == "World"
+
+    def test_cells_have_default_colspan_rowspan(self):
+        md = "| A | B |\n| --- | --- |\n| 1 | 2 |"
+        doc = self._parse(md)
+        table = next(n for n in doc["content"] if n["type"] == "table")
+        for row in table["content"]:
+            for cell in row["content"]:
+                assert cell["attrs"] == {"colspan": 1, "rowspan": 1}
+
+    def test_alignment_row_with_colons_consumed(self):
+        md = "| A | B |\n| :--- | ---: |\n| 1 | 2 |"
+        doc = self._parse(md)
+        table = next(n for n in doc["content"] if n["type"] == "table")
+        # alignment row is not stored as a tableRow
+        assert len(table["content"]) == 2
+        assert all(c["type"] == "tableHeader" for c in table["content"][0]["content"])
+
+    def test_cell_inline_marks_preserved(self):
+        md = "| Name |\n| --- |\n| **bold** |"
+        doc = self._parse(md)
+        table = next(n for n in doc["content"] if n["type"] == "table")
+        body_cell = table["content"][1]["content"][0]
+        inline = body_cell["content"][0]["content"]
+        bold = [n for n in inline if any(m["type"] == "bold" for m in n.get("marks", []))]
+        assert len(bold) == 1
+        assert bold[0]["text"] == "bold"
+
+    def test_table_with_escaped_pipe(self):
+        md = "| Col |\n| --- |\n| a \\| b |"
+        doc = self._parse(md)
+        table = next(n for n in doc["content"] if n["type"] == "table")
+        body_cell = table["content"][1]["content"][0]
+        text = body_cell["content"][0]["content"][0]["text"]
+        assert text == "a | b"
+
+    def test_round_trip_markdown_to_pm_to_markdown(self):
+        """Markdown table → ProseMirror → Markdown preserves structure."""
+        md = "| Category | Status | Notes |\n| --- | --- | --- |\n| Schedule | Green | ok |\n| Scope | Green | none |"
+        pm_json = markdown_to_prosemirror(md)
+        back = prosemirror_to_markdown(pm_json)
+        # Header row preserved
+        assert "| Category | Status | Notes |" in back
+        # Alignment row preserved
+        assert "| --- | --- | --- |" in back
+        # Body rows preserved
+        assert "| Schedule | Green | ok |" in back
+        assert "| Scope | Green | none |" in back
+
+    def test_round_trip_exact_equality_after_strip(self):
+        md = "| A | B |\n| --- | --- |\n| 1 | 2 |"
+        pm_json = markdown_to_prosemirror(md)
+        back = prosemirror_to_markdown(pm_json).strip()
+        assert back == md.strip()
+
+    def test_table_followed_by_paragraph(self):
+        md = "| A | B |\n| --- | --- |\n| 1 | 2 |\n\nBelow the table."
+        doc = self._parse(md)
+        types = [n["type"] for n in doc["content"]]
+        assert "table" in types
+        # Paragraph after table still present
+        paras = [n for n in doc["content"] if n["type"] == "paragraph"]
+        all_text = "".join(c.get("text", "") for p in paras for c in p.get("content", []))
+        assert "Below the table." in all_text
+
+    def test_non_table_markdown_unchanged(self):
+        """Regression guard: bullets, bold, links, headings still work after table support."""
+        md = "## Heading\n\n- item\n- **bold** item\n- [link](https://example.com)\n\nPlain text."
+        doc = self._parse(md)
+        # Heading
+        headings = [n for n in doc["content"] if n["type"] == "heading"]
+        assert len(headings) == 1
+        # Bullet list
+        lists = [n for n in doc["content"] if n["type"] == "bulletList"]
+        assert len(lists) == 1
+        assert len(lists[0]["content"]) == 3
+        # Bold
+        items = lists[0]["content"]
+        bold_item_inline = items[1]["content"][0]["content"]
+        assert any(any(m["type"] == "bold" for m in n.get("marks", [])) for n in bold_item_inline)
+        # Link
+        link_item_inline = items[2]["content"][0]["content"]
+        link_marks = [
+            m for n in link_item_inline for m in n.get("marks", []) if m["type"] == "link"
+        ]
+        assert len(link_marks) == 1
+        # Plain paragraph
+        paras = [n for n in doc["content"] if n["type"] == "paragraph"]
+        plain = "".join(c.get("text", "") for p in paras for c in p.get("content", []))
+        assert "Plain text." in plain
+
+    def test_no_table_when_separator_missing(self):
+        """A single | row without a --- separator must not be interpreted as a table."""
+        md = "| not | a | table |"
+        doc = self._parse(md)
+        assert not any(n["type"] == "table" for n in doc["content"])
+        # Falls back to paragraph
+        assert any(n["type"] == "paragraph" for n in doc["content"])
+
+    def test_pipe_in_plain_text_not_promoted_to_table(self):
+        """A standalone paragraph containing | must remain a paragraph."""
+        md = "Hello | world"
+        doc = self._parse(md)
+        assert not any(n["type"] == "table" for n in doc["content"])
+
+    def test_uneven_rows_padded_by_round_trip(self):
+        """A row with fewer cells than the header is tolerated; round-trip pads cells."""
+        md = "| A | B |\n| --- | --- |\n| 1 |"
+        pm_json = markdown_to_prosemirror(md)
+        back = prosemirror_to_markdown(pm_json)
+        # The parser emits one body cell; the renderer pads to column count.
+        assert "| A | B |" in back
+        assert "| 1 |  |" in back

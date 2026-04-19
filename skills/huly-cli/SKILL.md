@@ -208,6 +208,18 @@ huly documents duplicate TEMPLATE_DOC_ID \
 default and copies its markdown content into the new doc in one call. Pass
 `--space "Name"` or `--parent DOC_ID` to override those defaults.
 
+Document content (`documents describe`):
+
+- `--set` / `--set-file` — markdown input. GFM pipe tables are preserved
+  and round-trip back to valid markdown on read.
+- `--set-raw` / `--set-raw-file` — raw ProseMirror JSON, written verbatim
+  (skips markdown parsing). Use this for features the markdown parser does
+  not cover: colspan/rowspan, custom node types, or when cloning a doc via
+  `describe --raw` and writing a tweaked version back.
+- All four write flags are mutually exclusive. `--set-raw` / `--set-raw-file`
+  validate that the root is `{"type": "doc", "content": [...]}` before any
+  network IO.
+
 Document hierarchy with `documents tree`:
 
 - `huly documents tree` — every space, grouped by teamspace root

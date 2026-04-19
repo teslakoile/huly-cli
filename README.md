@@ -218,6 +218,26 @@ huly --json documents tree                      # nested JSON output
 command — useful for instantiating template-style docs. It inherits the
 source's space and parent by default; pass `--space` or `--parent` to override.
 
+Markdown tables (`| a | b |\n| --- | --- |\n| 1 | 2 |`) round-trip through
+`documents describe --set` / `--set-file` — they are stored as real
+ProseMirror `table` / `tableRow` / `tableHeader` / `tableCell` nodes, not
+literal pipe characters, and the Huly UI renders them as styled tables.
+
+For ProseMirror features the markdown parser does not cover (colspan,
+rowspan, custom node types), pass raw ProseMirror JSON directly:
+
+```bash
+# Inline JSON
+huly documents describe DOC_ID --set-raw '{"type":"doc","content":[...]}'
+
+# From a file
+huly documents describe DOC_ID --set-raw-file ./doc.pm.json
+```
+
+The four write flags (`--set`, `--set-file`, `--set-raw`, `--set-raw-file`)
+are mutually exclusive; invalid JSON or a non-`doc` root is rejected before
+any network IO.
+
 `--markdown` is the preferred read path for agents: no Rich box, no reflow, no
 ellipsis truncation, and the output round-trips cleanly back into `--set-file`.
 `--raw` and `--markdown` are mutually exclusive.

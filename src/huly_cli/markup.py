@@ -338,6 +338,38 @@ def markdown_to_prosemirror(md: str) -> str:
             content.append({"type": "orderedList", "content": items})
             continue
 
+        # GFM pipe table. Requires at least 2 consecutive lines:
+        #   | a | b |
+        #   | --- | --- |
+        # (optional alignment colons), followed by zero or more body rows.
+        if _is_table_row(line) and i + 1 < len(lines) and _is_table_separator(lines[i + 1]):
+            header_cells = _split_table_cells(line)
+            # Skip alignment row entirely (attrs not stored; non-goal per issue).
+            i += 2
+            body_rows: list[list[str]] = []
+            while i < len(lines) and _is_table_row(lines[i]):
+                body_rows.append(_split_table_cells(lines[i]))
+                i += 1
+
+            rows: list[dict] = []
+            # Header row
+            rows.append(
+                {
+                    "type": "tableRow",
+                    "content": [_cell_node("tableHeader", c) for c in header_cells],
+                }
+            )
+            # Body rows
+            for body in body_rows:
+                rows.append(
+                    {
+                        "type": "tableRow",
+                        "content": [_cell_node("tableCell", c) for c in body],
+                    }
+                )
+            content.append({"type": "table", "content": rows})
+            continue
+
         # Empty line
         if not line.strip():
             i += 1
@@ -348,6 +380,65 @@ def markdown_to_prosemirror(md: str) -> str:
         i += 1
 
     return json.dumps({"type": "doc", "content": content})
+
+
+# ── GFM table helpers ─────────────────────────────────────────────────────────
+
+
+_TABLE_ROW_RE = re.compile(r"^\s*\|.*\|\s*$")
+_TABLE_SEPARATOR_RE = re.compile(r"^\s*\|(?:\s*:?-+:?\s*\|)+\s*$")
+
+
+def _is_table_row(line: str) -> bool:
+    return bool(_TABLE_ROW_RE.match(line))
+
+
+def _is_table_separator(line: str) -> bool:
+    return bool(_TABLE_SEPARATOR_RE.match(line))
+
+
+def _split_table_cells(line: str) -> list[str]:
+    """Split a GFM pipe-table row into cell strings.
+
+    Drops the leading/trailing empty segments produced by the enclosing pipes
+    (``| a | b |`` → ``["a", "b"]``) and strips each cell. Escaped pipes
+    (``\\|``) inside a cell are preserved as literal pipes.
+    """
+    stripped = line.strip()
+    # Strip outer pipes if present.
+    if stripped.startswith("|"):
+        stripped = stripped[1:]
+    if stripped.endswith("|"):
+        stripped = stripped[:-1]
+
+    # Split on unescaped pipes.
+    cells: list[str] = []
+    buf = ""
+    k = 0
+    while k < len(stripped):
+        ch = stripped[k]
+        if ch == "\\" and k + 1 < len(stripped) and stripped[k + 1] == "|":
+            buf += "|"
+            k += 2
+            continue
+        if ch == "|":
+            cells.append(buf.strip())
+            buf = ""
+            k += 1
+            continue
+        buf += ch
+        k += 1
+    cells.append(buf.strip())
+    return cells
+
+
+def _cell_node(cell_type: str, text: str) -> dict:
+    """Build a ``tableCell`` or ``tableHeader`` node wrapping a single paragraph."""
+    return {
+        "type": cell_type,
+        "attrs": {"colspan": 1, "rowspan": 1},
+        "content": [{"type": "paragraph", "content": _parse_inline(text)}],
+    }
 
 
 def _parse_inline(text: str) -> list[dict]:
