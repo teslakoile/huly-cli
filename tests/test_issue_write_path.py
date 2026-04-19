@@ -515,6 +515,37 @@ def test_documents_describe_write_flags_mutually_exclusive(tmp_path, flags):
     assert "Use only one of --set, --set-file, --set-raw, --set-raw-file." in result.output
 
 
+def test_documents_describe_set_markdown_table_emits_prosemirror_table(fake_auth):
+    """End-to-end (#42 Path A): markdown table via --set reaches create_content as a real `table` node."""
+    tx_mock = AsyncMock(return_value={})
+    create_content_mock = AsyncMock(return_value="blob-table-1")
+
+    table_md = "| a | b |\n| --- | --- |\n| 1 | 2 |"
+
+    with (
+        patch("huly_cli.commands.documents.ensure_auth", new=AsyncMock(return_value=fake_auth)),
+        patch(
+            "huly_cli.client.HulyClient.find_all",
+            new=AsyncMock(return_value=[_doc_raw_no_content()]),
+        ),
+        patch("huly_cli.client.HulyClient.create_content", create_content_mock),
+        patch("huly_cli.client.HulyClient.tx", tx_mock),
+    ):
+        result = runner.invoke(app, ["documents", "describe", "doc-1", "--set", table_md])
+
+    assert result.exit_code == 0, result.output
+    create_content_mock.assert_awaited_once()
+    markup_passed = create_content_mock.await_args.args[3]
+    parsed = json.loads(markup_passed)
+    # Top-level doc must contain a table node, not a paragraph-of-pipes fallback.
+    tables = [n for n in parsed["content"] if n["type"] == "table"]
+    assert len(tables) == 1, f"expected a table node, got {parsed['content']}"
+    # Header/body cell distinction.
+    rows = tables[0]["content"]
+    assert all(c["type"] == "tableHeader" for c in rows[0]["content"])
+    assert all(c["type"] == "tableCell" for c in rows[1]["content"])
+
+
 def test_documents_describe_set_errors_when_blob_create_fails(fake_auth):
     """When create_content returns None, documents describe --set shows an error."""
     create_content_mock = AsyncMock(return_value=None)

@@ -178,6 +178,18 @@ Issue-specific fields supported on create/update:
 - `--label` — repeatable flag to attach labels
 - `--description` — markdown text (create only)
 
+Document content (`documents describe`):
+
+- `--set` / `--set-file` — markdown input. GFM pipe tables are preserved
+  and round-trip back to valid markdown on read.
+- `--set-raw` / `--set-raw-file` — raw ProseMirror JSON, written verbatim
+  (skips markdown parsing). Use this for features the markdown parser does
+  not cover: colspan/rowspan, custom node types, or when cloning a doc via
+  `describe --raw` and writing a tweaked version back.
+- All four write flags are mutually exclusive. `--set-raw` / `--set-raw-file`
+  validate that the root is `{"type": "doc", "content": [...]}` before any
+  network IO.
+
 ### 5. Use repo facts when relevant
 
 If operating from a clone of this repository:

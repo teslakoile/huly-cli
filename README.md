@@ -191,6 +191,26 @@ huly documents update DOC_ID --title "Updated Title"
 huly documents delete DOC_ID
 ```
 
+Markdown tables (`| a | b |\n| --- | --- |\n| 1 | 2 |`) round-trip through
+`documents describe --set` / `--set-file` — they are stored as real
+ProseMirror `table` / `tableRow` / `tableHeader` / `tableCell` nodes, not
+literal pipe characters, and the Huly UI renders them as styled tables.
+
+For ProseMirror features the markdown parser does not cover (colspan,
+rowspan, custom node types), pass raw ProseMirror JSON directly:
+
+```bash
+# Inline JSON
+huly documents describe DOC_ID --set-raw '{"type":"doc","content":[...]}'
+
+# From a file
+huly documents describe DOC_ID --set-raw-file ./doc.pm.json
+```
+
+The four write flags (`--set`, `--set-file`, `--set-raw`, `--set-raw-file`)
+are mutually exclusive; invalid JSON or a non-`doc` root is rejected before
+any network IO.
+
 ### Components
 
 ```bash
