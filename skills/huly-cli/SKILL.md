@@ -142,6 +142,22 @@ components, and milestones.
 
 Prefer `--json` when an agent needs stable machine-readable output.
 
+Agent-friendly read paths for document content:
+
+- `huly documents describe DOC_ID --markdown` — plain GFM to stdout, no Rich
+  box and no reflow. Preferred over the default rendered output when the agent
+  will diff, grep, or re-emit the content. Also safe to pipe into
+  `--set-file` for round-trips.
+- `huly documents describe DOC_ID --raw` — raw ProseMirror JSON (structural,
+  not line-diffable).
+- `huly documents describe DOC_ID` (no flag) — rendered Rich panel, for humans.
+
+`--raw` and `--markdown` are mutually exclusive.
+
+ID columns in list output (`huly documents list`, `huly components list`, etc.)
+always show the full ID — agents can copy values directly into follow-up
+`huly ... get <ID>` calls without re-querying with `--json`.
+
 Current implemented command groups:
 
 - `auth` — login, status

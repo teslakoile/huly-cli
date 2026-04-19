@@ -153,3 +153,57 @@ class TestPrintErrorJson:
         # Should be on stderr, not stdout
         assert captured.out == ""
         assert captured.err != ""
+
+
+class TestPrintListIdTruncation:
+    """Regression tests for issue #38: ID columns must never render with `…`.
+
+    Rich's default `overflow="ellipsis"` truncates 24-char hex Huly IDs to
+    something like `69cba04d0122c97…`, which users then copy into `huly
+    documents get …` only to hit "not found". `print_list` widens `id` and
+    `parent` columns so the full value always appears and can be reused.
+    """
+
+    def setup_method(self):
+        set_json_mode(False)
+
+    def teardown_method(self):
+        set_json_mode(False)
+
+    def test_id_column_shows_full_value(self, capsys):
+        from huly_cli.output import print_list
+
+        long_id = "69cba08c0122c97fabcdef34"
+        print_list([{"title": "Doc", "id": long_id}], columns=["title", "id"])
+        captured = capsys.readouterr()
+        assert long_id in captured.out
+        assert "…" not in captured.out
+
+    def test_parent_column_shows_full_value(self, capsys):
+        from huly_cli.output import print_list
+
+        long_parent = "69cba04d0122c97fabcdef12"
+        print_list(
+            [{"title": "Doc", "parent": long_parent, "id": "x"}],
+            columns=["title", "parent", "id"],
+        )
+        captured = capsys.readouterr()
+        assert long_parent in captured.out
+        assert "…" not in captured.out
+
+    def test_non_id_columns_still_allowed_to_truncate(self, capsys):
+        """Only `id` / `parent` are protected; other long columns may still wrap/truncate.
+
+        We don't strictly assert truncation (Rich's terminal-width detection in
+        a non-tty may widen the table anyway); the point is that the helper
+        doesn't crash or mis-render non-ID columns when the ID rule triggers.
+        """
+        from huly_cli.output import print_list
+
+        print_list(
+            [{"title": "x" * 80, "id": "69cba08c0122c97fabcdef34"}],
+            columns=["title", "id"],
+        )
+        captured = capsys.readouterr()
+        # Full ID still present; no crash.
+        assert "69cba08c0122c97fabcdef34" in captured.out
