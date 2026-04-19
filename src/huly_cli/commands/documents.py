@@ -94,6 +94,29 @@ async def _find_document_by_id(client: HulyClient, doc_id: str) -> Document:
     return Document.model_validate(raw[0])
 
 
+async def _resolve_document_by_title(client: HulyClient, title: str) -> Document:
+    """Resolve a document by case-insensitive exact title match.
+
+    Raises NotFoundError if no match, or HulyError with a formatted match table
+    if multiple documents share the same title.
+    """
+    raw = await client.find_all(
+        "document:class:Document",
+        options={"limit": 500},
+    )
+    title_lower = title.lower()
+    matches = [d for d in raw if (d.get("title") or "").lower() == title_lower]
+    if not matches:
+        raise NotFoundError(f"No document matched title '{title}'.")
+    if len(matches) > 1:
+        rows = "\n".join(f"  - {d.get('title', '')}  (id: {d['_id']})" for d in matches)
+        raise HulyError(
+            f"Multiple documents matched title '{title}':\n{rows}\n"
+            "Pass the document ID directly to disambiguate."
+        )
+    return Document.model_validate(matches[0])
+
+
 # ── Commands ──────────────────────────────────────────────────────────────────
 
 
@@ -104,12 +127,26 @@ def docs_list(
         str | None,
         typer.Option("--space", "-s", help="Filter by teamspace name."),
     ] = None,
+    title_contains: Annotated[
+        str | None,
+        typer.Option(
+            "--title-contains",
+            help=(
+                "Case-insensitive substring match on title. Applied client-side "
+                "after fetching --limit records; bump -n for larger workspaces."
+            ),
+        ),
+    ] = None,
+    parent: Annotated[
+        str | None,
+        typer.Option("--parent", help="List only direct children of this document ID."),
+    ] = None,
     limit: Annotated[
         int,
         typer.Option("--limit", "-n", help="Maximum number of documents to return."),
     ] = 50,
 ) -> None:
-    """List documents, with optional teamspace filter."""
+    """List documents, with optional teamspace / parent / title filters."""
     overrides: dict = ctx.obj or {}
     config = load_config(
         url_override=overrides.get("url"),
@@ -125,6 +162,8 @@ def docs_list(
             if space:
                 space_id = await _resolve_teamspace_by_name(client, space)
                 query["space"] = space_id
+            if parent:
+                query["parent"] = parent
 
             raw = await client.find_all(
                 "document:class:Document",
@@ -132,6 +171,10 @@ def docs_list(
                 options={"limit": limit},
             )
             docs = [Document.model_validate(doc) for doc in raw]
+
+            if title_contains:
+                needle = title_contains.lower()
+                docs = [d for d in docs if needle in (d.title or "").lower()]
 
         return [_doc_to_row(d, space_map) for d in docs]
 
@@ -150,9 +193,23 @@ def docs_list(
 @app.command("get")
 def docs_get(
     ctx: typer.Context,
-    doc_id: str = typer.Argument(..., help="Document internal ID."),
+    doc_id: str | None = typer.Argument(
+        None,
+        help="Document internal ID (omit when using --title).",
+    ),
+    title: Annotated[
+        str | None,
+        typer.Option(
+            "--title",
+            help="Resolve by case-insensitive exact title match instead of ID.",
+        ),
+    ] = None,
 ) -> None:
-    """Get details of a document."""
+    """Get details of a document by ID or by --title."""
+    if (doc_id is None) == (title is None):
+        print_error("Provide either DOC_ID or --title, not both.")
+        raise typer.Exit(1)
+
     overrides: dict = ctx.obj or {}
     config = load_config(
         url_override=overrides.get("url"),
@@ -162,7 +219,10 @@ def docs_get(
     async def _run() -> dict[str, Any]:
         auth = await ensure_auth(config)
         async with HulyClient(config, auth) as client:
-            doc = await _find_document_by_id(client, doc_id)
+            if title is not None:
+                doc = await _resolve_document_by_title(client, title)
+            else:
+                doc = await _find_document_by_id(client, doc_id)  # type: ignore[arg-type]
             space_map = await _fetch_teamspace_map(client)
         return _doc_to_detail(doc, space_map)
 
@@ -178,7 +238,7 @@ def docs_get(
         print_error(e.message)
         raise typer.Exit(1) from e
 
-    print_item(data, title=f"Document: {data.get('title', doc_id)}")
+    print_item(data, title=f"Document: {data.get('title', doc_id or title)}")
 
 
 @app.command("create")
@@ -295,7 +355,17 @@ def docs_update(
 @app.command("describe")
 def docs_describe(
     ctx: typer.Context,
-    doc_id: str = typer.Argument(..., help="Document internal ID."),
+    doc_id: str | None = typer.Argument(
+        None,
+        help="Document internal ID (omit when using --title).",
+    ),
+    title: Annotated[
+        str | None,
+        typer.Option(
+            "--title",
+            help="Resolve by case-insensitive exact title match instead of ID.",
+        ),
+    ] = None,
     raw: Annotated[
         bool,
         typer.Option("--raw", help="Show raw ProseMirror JSON instead of rendered markdown."),
@@ -309,7 +379,7 @@ def docs_describe(
         typer.Option("--set-file", help="Set content from a markdown file path."),
     ] = None,
 ) -> None:
-    """Read or update the content of a document.
+    """Read or update the content of a document by ID or by --title.
 
     By default, reads and displays the content. Use --set or --set-file to write.
     """
@@ -317,11 +387,20 @@ def docs_describe(
         print_error("Use either --set or --set-file, not both.")
         raise typer.Exit(1)
 
+    if (doc_id is None) == (title is None):
+        print_error("Provide either DOC_ID or --title, not both.")
+        raise typer.Exit(1)
+
     overrides: dict = ctx.obj or {}
     config = load_config(
         url_override=overrides.get("url"),
         workspace_override=overrides.get("workspace"),
     )
+
+    async def _resolve(client: HulyClient) -> Document:
+        if title is not None:
+            return await _resolve_document_by_title(client, title)
+        return await _find_document_by_id(client, doc_id)  # type: ignore[arg-type]
 
     # ── Write path ────────────────────────────────────────────────────────
     if set_text is not None or set_file is not None:
@@ -341,7 +420,7 @@ def docs_describe(
             auth = await ensure_auth(config)
             async with HulyClient(config, auth) as client:
                 markup = markdown_to_prosemirror(markdown_content or "")
-                doc = await _find_document_by_id(client, doc_id)
+                doc = await _resolve(client)
                 if doc.content and not _is_inline_markup(doc.content):
                     ok = await client.set_content(
                         "document:class:Document", doc.id, "content", doc.content, markup
@@ -369,7 +448,7 @@ def docs_describe(
                             "modifiedOn": int(time.time() * 1000),
                         }
                     )
-            return doc.title or doc_id
+            return doc.title or doc.id
 
         try:
             title_label = asyncio.run(_write())
@@ -387,22 +466,22 @@ def docs_describe(
         return
 
     # ── Read path ─────────────────────────────────────────────────────────
-    async def _run() -> tuple[str, str | None]:
+    async def _run() -> tuple[str, str, str | None]:
         auth = await ensure_auth(config)
         async with HulyClient(config, auth) as client:
-            doc = await _find_document_by_id(client, doc_id)
+            doc = await _resolve(client)
             if not doc.content:
-                return doc.title or doc_id, None
+                return doc.id, doc.title or doc.id, None
             if _is_inline_markup(doc.content):
                 content = doc.content
             else:
                 content = await client.get_content(
                     "document:class:Document", doc.id, "content", doc.content
                 )
-        return doc.title or doc_id, content
+        return doc.id, doc.title or doc.id, content
 
     try:
-        title_label, content = asyncio.run(_run())
+        resolved_id, title_label, content = asyncio.run(_run())
     except NotFoundError as e:
         print_error(e.message)
         raise typer.Exit(1) from e
@@ -419,12 +498,12 @@ def docs_describe(
 
     if is_json_mode():
         if raw:
-            print(json.dumps({"ok": True, "id": doc_id, "content_raw": content}))
+            print(json.dumps({"ok": True, "id": resolved_id, "content_raw": content}))
         else:
             from huly_cli.markup import prosemirror_to_markdown
 
             md = prosemirror_to_markdown(content)
-            print(json.dumps({"ok": True, "id": doc_id, "content": md}))
+            print(json.dumps({"ok": True, "id": resolved_id, "content": md}))
         return
 
     if raw:
@@ -447,6 +526,51 @@ def docs_describe(
 
             plain = prosemirror_to_text(content)
             console.print(Panel(plain or "(empty content)", title=f"Content: {title_label}"))
+
+
+@app.command("search")
+def docs_search(
+    ctx: typer.Context,
+    query: str = typer.Argument(..., help="Case-insensitive title substring to match."),
+    limit: Annotated[
+        int,
+        typer.Option("--limit", "-n", help="Maximum number of documents to scan."),
+    ] = 200,
+) -> None:
+    """Search documents by title substring.
+
+    Currently a client-side title-substring filter over `find-all`. The backend
+    will swap to the workspace fulltext endpoint once that command lands.
+    """
+    overrides: dict = ctx.obj or {}
+    config = load_config(
+        url_override=overrides.get("url"),
+        workspace_override=overrides.get("workspace"),
+    )
+
+    async def _run() -> list[dict[str, Any]]:
+        auth = await ensure_auth(config)
+        async with HulyClient(config, auth) as client:
+            space_map = await _fetch_teamspace_map(client)
+            raw = await client.find_all(
+                "document:class:Document",
+                options={"limit": limit},
+            )
+            docs = [Document.model_validate(doc) for doc in raw]
+            needle = query.lower()
+            docs = [d for d in docs if needle in (d.title or "").lower()]
+        return [_doc_to_row(d, space_map) for d in docs]
+
+    try:
+        rows = asyncio.run(_run())
+    except AuthError as e:
+        print_error(e.message, hint="Run 'huly auth login' to authenticate.")
+        raise typer.Exit(2) from e
+    except HulyError as e:
+        print_error(e.message)
+        raise typer.Exit(1) from e
+
+    print_list(rows, columns=["title", "space", "parent", "id"], title=f"Search: {query}")
 
 
 @app.command("delete")
