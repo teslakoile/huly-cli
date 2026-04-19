@@ -403,3 +403,97 @@ async def test_find_all_drops_mixed_non_dict_rows(fake_config, fake_auth):
             result = await client.find_all("tracker:class:Issue")
     assert len(result) == 1
     assert result[0]["_id"] == "keep"
+
+
+# ── fulltext_search ───────────────────────────────────────────────────────────
+
+# Real server bodies are truncated: Content-Length is declared but the closing
+# ``}`` (and surrounding chars) are missing. Stock ``json.loads`` fails every
+# call. The workaround extracts the ``docs`` array directly with a regex.
+TRUNCATED_BODY = (
+    '{"docs":['
+    '{"id":"i1","title":"Fix login","doc":{"_id":"i1","_class":"tracker:class:Issue"},'
+    '"score":100.5,"iconComponent":"x"},'
+    '{"id":"d1","title":"Onboarding","doc":{"_id":"d1","_class":"document:class:Document"},'
+    '"score":42.0,"iconComponent":"x"}'
+    '],"total":1'  # ← no closing } here. This is the upstream bug.
+)
+
+
+async def test_fulltext_search_parses_truncated_body(fake_config, fake_auth):
+    """THE load-bearing test: real server bodies are truncated JSON.
+
+    If the workaround regresses, every call breaks at runtime. Prove the
+    fixture is actually invalid JSON first, then confirm the method still
+    returns the parsed docs array.
+    """
+    # Sanity check: if this fixture ever accidentally becomes valid JSON, the
+    # test no longer exercises the workaround.
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(TRUNCATED_BODY)
+
+    with respx.mock:
+        respx.get("https://test.example.com/_transactor/api/v1/search-fulltext/w-test-123").respond(
+            200, text=TRUNCATED_BODY
+        )
+        async with HulyClient(fake_config, fake_auth) as client:
+            result = await client.fulltext_search("login")
+
+    assert len(result) == 2
+    assert result[0]["id"] == "i1"
+    assert result[0]["doc"]["_class"] == "tracker:class:Issue"
+    assert result[1]["doc"]["_class"] == "document:class:Document"
+
+
+async def test_fulltext_search_query_and_limit_params(fake_config, fake_auth):
+    """fulltext_search sends query + limit as GET query parameters."""
+    with respx.mock:
+        route = respx.get(
+            "https://test.example.com/_transactor/api/v1/search-fulltext/w-test-123"
+        ).respond(200, text='{"docs":[],"total":0')
+        async with HulyClient(fake_config, fake_auth) as client:
+            await client.fulltext_search("project", limit=42)
+        request = route.calls[0].request
+        assert request.url.params["query"] == "project"
+        assert request.url.params["limit"] == "42"
+
+
+async def test_fulltext_search_client_side_class_filter(fake_config, fake_auth):
+    """``classes=`` filters client-side on each doc's nested ``doc._class``."""
+    body = (
+        '{"docs":['
+        '{"id":"i1","title":"Bug","doc":{"_id":"i1","_class":"tracker:class:Issue"},'
+        '"score":10,"iconComponent":"x"},'
+        '{"id":"d1","title":"Doc","doc":{"_id":"d1","_class":"document:class:Document"},'
+        '"score":5,"iconComponent":"x"}'
+        '],"total":1'
+    )
+    with respx.mock:
+        respx.get("https://test.example.com/_transactor/api/v1/search-fulltext/w-test-123").respond(
+            200, text=body
+        )
+        async with HulyClient(fake_config, fake_auth) as client:
+            result = await client.fulltext_search("query", classes=["tracker:class:Issue"])
+    assert len(result) == 1
+    assert result[0]["id"] == "i1"
+
+
+async def test_fulltext_search_empty_docs(fake_config, fake_auth):
+    """An empty ``docs`` array parses cleanly and returns []."""
+    with respx.mock:
+        respx.get("https://test.example.com/_transactor/api/v1/search-fulltext/w-test-123").respond(
+            200, text='{"docs":[],"total":0'
+        )
+        async with HulyClient(fake_config, fake_auth) as client:
+            result = await client.fulltext_search("noresults")
+    assert result == []
+
+
+async def test_fulltext_search_auth_error_on_401(fake_config, fake_auth):
+    with respx.mock:
+        respx.get("https://test.example.com/_transactor/api/v1/search-fulltext/w-test-123").respond(
+            401
+        )
+        async with HulyClient(fake_config, fake_auth) as client:
+            with pytest.raises(AuthError):
+                await client.fulltext_search("q")
