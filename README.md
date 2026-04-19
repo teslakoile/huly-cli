@@ -190,7 +190,17 @@ huly issues delete DEMO-1
 ### Documents
 
 ```bash
+# List and filter
 huly documents list --space "Engineering"
+huly documents list --title-contains "RAG"       # case-insensitive substring
+huly documents list --parent DOC_ID              # direct children only
+
+# Find a doc without knowing its ID
+huly documents search "rag template"             # alias for --title-contains
+huly documents get --title "Design Doc"          # errors if title is ambiguous
+huly documents describe --title "Design Doc"
+
+# Create / update / describe / delete by ID
 huly documents create --space "Engineering" --title "Design Doc"
 
 # Read content

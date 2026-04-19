@@ -769,7 +769,7 @@ def test_documents_list_shows_space():
     assert "Engineering" in result.output
 
 
-# ── documents tree ─────────────────────────────────────────────────────────────
+# ── documents discovery filters (#37) ─────────────────────────────────────────
 
 
 def _doc(_id, title, parent="document:ids:NoParent", space="ts1", rank=""):
@@ -788,6 +788,150 @@ def _doc(_id, title, parent="document:ids:NoParent", space="ts1", rank=""):
         "modifiedBy": "",
         "modifiedOn": 0,
     }
+
+
+def test_documents_list_title_contains_filters_case_insensitive():
+    """--title-contains should be a case-insensitive substring filter on title."""
+    docs = [
+        _doc("doc-1", "RAG Template"),
+        _doc("doc-2", "Unrelated note"),
+        _doc("doc-3", "lower rag match"),
+    ]
+    find_mock = AsyncMock(side_effect=[TEAMSPACE_DATA, docs])
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["documents", "list", "--title-contains", "RAG"])
+    assert result.exit_code == 0, result.output
+    assert "RAG Template" in result.output
+    assert "lower rag match" in result.output
+    assert "Unrelated note" not in result.output
+
+
+def test_documents_list_parent_filter_passes_parent_to_find_all():
+    """--parent PARENT_ID should forward parent into the find-all query."""
+    find_mock = AsyncMock(
+        side_effect=[TEAMSPACE_DATA, [_doc("doc-child", "Child doc", "doc-parent")]]
+    )
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["documents", "list", "--parent", "doc-parent"])
+    assert result.exit_code == 0, result.output
+    assert "Child doc" in result.output
+    # Second find_all call is the documents query; it should include parent in its query arg
+    docs_call = find_mock.await_args_list[1]
+    assert docs_call.kwargs["query"]["parent"] == "doc-parent"
+
+
+def test_documents_get_by_title_resolves_unique_match():
+    """documents get --title TITLE returns the doc when exactly one match exists."""
+    docs = [
+        _doc("doc-1", "My RAG Template"),
+        _doc("doc-2", "Something else"),
+    ]
+    # Order in docs_get: _resolve_document_by_title find_all, then teamspace find_all
+    find_mock = AsyncMock(side_effect=[docs, TEAMSPACE_DATA])
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["documents", "get", "--title", "my rag template"])
+    assert result.exit_code == 0, result.output
+    assert "My RAG Template" in result.output
+    assert "doc-1" in result.output
+
+
+def test_documents_get_by_title_errors_on_multiple_matches():
+    """Multiple title matches must error with a table of (title, id) pairs — no silent pick."""
+    docs = [
+        _doc("doc-1", "Design Doc"),
+        _doc("doc-2", "Design Doc"),
+    ]
+    find_mock = AsyncMock(return_value=docs)
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["documents", "get", "--title", "Design Doc"])
+    assert result.exit_code == 1
+    assert "multiple" in result.output.lower()
+    assert "doc-1" in result.output
+    assert "doc-2" in result.output
+
+
+def test_documents_get_by_title_not_found_exits_nonzero():
+    """documents get --title with no match should exit 1 with a clear message."""
+    find_mock = AsyncMock(return_value=[_doc("doc-1", "Something")])
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["documents", "get", "--title", "nonexistent"])
+    assert result.exit_code == 1
+    assert "no document matched" in result.output.lower()
+
+
+def test_documents_get_requires_doc_id_or_title():
+    """documents get called with neither DOC_ID nor --title must exit 1."""
+    with _auth_patch():
+        result = runner.invoke(app, ["documents", "get"])
+    assert result.exit_code == 1
+    assert "either" in result.output.lower()
+
+
+def test_documents_get_rejects_both_doc_id_and_title():
+    """documents get with both DOC_ID and --title must exit 1."""
+    with _auth_patch():
+        result = runner.invoke(app, ["documents", "get", "doc-1", "--title", "Thing"])
+    assert result.exit_code == 1
+    assert "either" in result.output.lower()
+
+
+def test_documents_describe_by_title_resolves_unique_match():
+    """documents describe --title TITLE reads the doc content when exactly one match exists."""
+    docs = [
+        _doc("doc-1", "My RAG Template"),
+    ]
+    # describe read path: resolve title, then since content is empty, it short-circuits
+    find_mock = AsyncMock(return_value=docs)
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["documents", "describe", "--title", "my rag template"])
+    # Empty content triggers "No content available" error; we still verified the title resolved
+    assert result.exit_code == 1
+    assert "My RAG Template" in result.output
+
+
+def test_documents_describe_by_title_errors_on_multiple_matches():
+    """documents describe --title with duplicate titles must surface all matches."""
+    docs = [
+        _doc("doc-1", "Design Doc"),
+        _doc("doc-2", "Design Doc"),
+    ]
+    find_mock = AsyncMock(return_value=docs)
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["documents", "describe", "--title", "Design Doc"])
+    assert result.exit_code == 1
+    assert "multiple" in result.output.lower()
+    assert "doc-1" in result.output
+    assert "doc-2" in result.output
+
+
+def test_documents_search_filters_by_title_substring():
+    """documents search QUERY wraps list with a client-side title-substring filter."""
+    docs = [
+        _doc("doc-1", "RAG Template"),
+        _doc("doc-2", "Unrelated note"),
+        _doc("doc-3", "Another RAG doc"),
+    ]
+    # search calls find_all twice: once for teamspaces, once for documents
+    find_mock = AsyncMock(side_effect=[TEAMSPACE_DATA, docs])
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["documents", "search", "rag"])
+    assert result.exit_code == 0, result.output
+    assert "RAG Template" in result.output
+    assert "Another RAG doc" in result.output
+    assert "Unrelated note" not in result.output
+
+
+def test_documents_search_empty_result_exits_zero():
+    """documents search with no title matches should still exit 0."""
+    docs = [_doc("doc-1", "Unrelated note")]
+    find_mock = AsyncMock(side_effect=[TEAMSPACE_DATA, docs])
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["documents", "search", "nothing matches"])
+    assert result.exit_code == 0, result.output
+    assert "Unrelated note" not in result.output
+
+
+# ── documents tree ─────────────────────────────────────────────────────────────
 
 
 TREE_TEAMSPACES = [

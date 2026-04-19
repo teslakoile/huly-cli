@@ -163,7 +163,7 @@ Current implemented command groups:
 - `auth` — login, status
 - `projects` — list, get
 - `issues` — list, get, create, update, delete, describe, search
-- `documents` — list, get, create, update, delete, describe, tree, duplicate
+- `documents` — list, get, create, update, delete, describe, tree, duplicate, search
 - `components` — list, get, create, update, delete
 - `milestones` — list, get, create, update, delete
 - `templates` — list, get, describe (read/write)
@@ -195,6 +195,27 @@ Issue-specific fields supported on create/update:
 - `--label` — repeatable flag to attach labels
 - `--description` — markdown text (create only)
 
+Document discovery helpers (avoid the list → jq → copy-ID dance):
+
+- `documents list --title-contains TEXT` — case-insensitive title substring
+  (client-side filter over the fetched page; bump `-n` in large workspaces)
+- `documents list --parent DOC_ID` — direct children of a given document
+- `documents get --title TITLE` / `documents describe --title TITLE` —
+  resolve by case-insensitive exact title; errors with a match table if
+  multiple documents share the same title
+- `documents search "query"` — thin wrapper around `--title-contains`;
+  will swap to workspace fulltext once that lands
+
+Examples:
+
+```bash
+huly documents list --title-contains "RAG" -n 200
+huly documents list --parent DOC_ROOT_ID
+huly documents get --title "Design Doc"
+huly documents describe --title "Design Doc"
+huly documents search "rag template"
+```
+
 Common agent workflow — clone a weekly template:
 
 ```bash
@@ -207,6 +228,7 @@ huly documents duplicate TEMPLATE_DOC_ID \
 `documents duplicate` inherits the source document's space and parent by
 default and copies its markdown content into the new doc in one call. Pass
 `--space "Name"` or `--parent DOC_ID` to override those defaults.
+
 
 Document content (`documents describe`):
 
