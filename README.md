@@ -204,6 +204,13 @@ huly documents describe DOC_ID --set-file ./doc.md
 
 huly documents update DOC_ID --title "Updated Title"
 huly documents delete DOC_ID
+
+# Hierarchical view via the parent field
+huly documents tree                             # every space, grouped
+huly documents tree --space "Engineering"       # one teamspace
+huly documents tree --root DOC_ID               # subtree under one doc
+huly documents tree --depth 2                   # cap recursion
+huly --json documents tree                      # nested JSON output
 ```
 
 `--markdown` is the preferred read path for agents: no Rich box, no reflow, no

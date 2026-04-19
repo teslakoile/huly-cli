@@ -769,6 +769,216 @@ def test_documents_list_shows_space():
     assert "Engineering" in result.output
 
 
+# ── documents tree ─────────────────────────────────────────────────────────────
+
+
+def _doc(_id, title, parent="document:ids:NoParent", space="ts1", rank=""):
+    return {
+        "_id": _id,
+        "title": title,
+        "content": "",
+        "space": space,
+        "parent": parent,
+        "attachments": 0,
+        "labels": 0,
+        "comments": 0,
+        "rank": rank,
+        "createdBy": "",
+        "createdOn": 0,
+        "modifiedBy": "",
+        "modifiedOn": 0,
+    }
+
+
+TREE_TEAMSPACES = [
+    {
+        "_id": "ts1",
+        "name": "Engineering",
+        "description": "",
+        "private": False,
+        "archived": False,
+        "members": [],
+        "owners": [],
+    },
+    {
+        "_id": "ts2",
+        "name": "Design",
+        "description": "",
+        "private": False,
+        "archived": False,
+        "members": [],
+        "owners": [],
+    },
+]
+
+# A three-level tree in ts1 plus one doc in ts2.
+TREE_DOCS = [
+    _doc("root-a", "Root A", parent="document:ids:NoParent", space="ts1", rank="a"),
+    _doc("root-b", "Root B", parent="document:ids:NoParent", space="ts1", rank="b"),
+    _doc("child-a1", "Child A1", parent="root-a", space="ts1", rank="a"),
+    _doc("child-a2", "Child A2", parent="root-a", space="ts1", rank="b"),
+    _doc("grand-a1a", "Grand A1a", parent="child-a1", space="ts1", rank="a"),
+    _doc("ts2-doc", "Design Doc", parent="document:ids:NoParent", space="ts2"),
+]
+
+
+def test_documents_tree_renders_all_spaces():
+    find_mock = AsyncMock(side_effect=[TREE_TEAMSPACES, TREE_DOCS])
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["documents", "tree"])
+    assert result.exit_code == 0, result.output
+    # Space roots and each doc title appear.
+    assert "Engineering" in result.output
+    assert "Design" in result.output
+    assert "Root A" in result.output
+    assert "Child A1" in result.output
+    assert "Grand A1a" in result.output
+    assert "Design Doc" in result.output
+
+
+def test_documents_tree_filters_by_space():
+    # find_all calls: teamspace map, teamspace resolve, documents.
+    find_mock = AsyncMock(side_effect=[TREE_TEAMSPACES, TREE_TEAMSPACES, TREE_DOCS[:5]])
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["documents", "tree", "--space", "Engineering"])
+    assert result.exit_code == 0, result.output
+    assert "Engineering" in result.output
+    assert "Root A" in result.output
+    # The Design space and its doc should not appear.
+    assert "Design Doc" not in result.output
+
+
+def test_documents_tree_root_subtree():
+    # find_all calls: teamspace map, _find_document_by_id, documents.
+    root_a_rows = [TREE_DOCS[0]]
+    find_mock = AsyncMock(side_effect=[TREE_TEAMSPACES, root_a_rows, TREE_DOCS[:5]])
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["documents", "tree", "--root", "root-a"])
+    assert result.exit_code == 0, result.output
+    assert "Root A" in result.output
+    assert "Child A1" in result.output
+    assert "Grand A1a" in result.output
+    # Sibling root should not appear in a subtree.
+    assert "Root B" not in result.output
+
+
+def test_documents_tree_root_not_found_exits_nonzero():
+    # _find_document_by_id returns [] → NotFoundError.
+    find_mock = AsyncMock(side_effect=[TREE_TEAMSPACES, []])
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["documents", "tree", "--root", "missing-id"])
+    assert result.exit_code == 1
+    assert "missing-id" in result.output or "not found" in result.output.lower()
+
+
+def test_documents_tree_depth_truncates():
+    find_mock = AsyncMock(side_effect=[TREE_TEAMSPACES, TREE_DOCS])
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        # depth=1: only top-level documents under each space.
+        result = runner.invoke(app, ["documents", "tree", "--depth", "1"])
+    assert result.exit_code == 0, result.output
+    assert "Root A" in result.output
+    # Children and grandchildren of Root A should be truncated.
+    assert "Child A1" not in result.output
+    assert "Grand A1a" not in result.output
+
+
+def test_documents_tree_depth_keeps_children_of_direct_children():
+    find_mock = AsyncMock(side_effect=[TREE_TEAMSPACES, TREE_DOCS])
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        # depth=2: top-level docs + their direct children; no grandchildren.
+        result = runner.invoke(app, ["documents", "tree", "--depth", "2"])
+    assert result.exit_code == 0, result.output
+    assert "Root A" in result.output
+    assert "Child A1" in result.output
+    assert "Grand A1a" not in result.output
+
+
+def test_documents_tree_root_depth_counts_root_as_level_1():
+    """With --root, depth=2 shows root + its direct children (tree -L 2)."""
+    root_a_rows = [TREE_DOCS[0]]
+    find_mock = AsyncMock(side_effect=[TREE_TEAMSPACES, root_a_rows, TREE_DOCS[:5]])
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["documents", "tree", "--root", "root-a", "--depth", "2"])
+    assert result.exit_code == 0, result.output
+    assert "Root A" in result.output
+    assert "Child A1" in result.output
+    # Grandchildren truncated at depth=2.
+    assert "Grand A1a" not in result.output
+
+
+def test_documents_tree_json_mode_nested_output():
+    import json as json_mod
+
+    find_mock = AsyncMock(side_effect=[TREE_TEAMSPACES, TREE_DOCS])
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["--json", "documents", "tree"])
+    assert result.exit_code == 0, result.output
+    payload = json_mod.loads(result.output)
+    assert payload["ok"] is True
+    roots = payload["data"]
+    assert isinstance(roots, list)
+    # Space nodes come back in sorted-by-id order; locate by title.
+    eng = next(r for r in roots if r["title"] == "Engineering")
+    # Each node has id/title/children.
+    assert set(eng.keys()) == {"id", "title", "children"}
+    root_a = next(c for c in eng["children"] if c["id"] == "root-a")
+    child_ids = [c["id"] for c in root_a["children"]]
+    assert "child-a1" in child_ids
+    # grandchild reachable
+    child_a1 = next(c for c in root_a["children"] if c["id"] == "child-a1")
+    assert any(g["id"] == "grand-a1a" for g in child_a1["children"])
+
+
+def test_documents_tree_root_json_mode_single_object():
+    import json as json_mod
+
+    root_a_rows = [TREE_DOCS[0]]
+    find_mock = AsyncMock(side_effect=[TREE_TEAMSPACES, root_a_rows, TREE_DOCS[:5]])
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["--json", "documents", "tree", "--root", "root-a"])
+    assert result.exit_code == 0, result.output
+    payload = json_mod.loads(result.output)
+    assert payload["ok"] is True
+    # Single-root mode returns a dict, not a list.
+    assert isinstance(payload["data"], dict)
+    assert payload["data"]["id"] == "root-a"
+    assert payload["data"]["title"] == "Root A"
+
+
+def test_documents_tree_cycle_is_broken():
+    # A↔B cycle: both point at each other; neither is NoParent.
+    cyclic_docs = [
+        _doc("cyc-a", "Cyclic A", parent="cyc-b", space="ts1"),
+        _doc("cyc-b", "Cyclic B", parent="cyc-a", space="ts1"),
+    ]
+    find_mock = AsyncMock(side_effect=[TREE_TEAMSPACES, cyclic_docs])
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["documents", "tree"])
+    # Must not hang or crash; both titles should appear.
+    assert result.exit_code == 0, result.output
+
+
+def test_documents_tree_orphan_renders_under_space_root():
+    # orphan-kid's parent is a doc not in the fetched set → bucket under space root.
+    orphan_docs = [
+        _doc("orphan-kid", "Orphan Kid", parent="missing-parent-id", space="ts1"),
+    ]
+    find_mock = AsyncMock(side_effect=[TREE_TEAMSPACES, orphan_docs])
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["documents", "tree"])
+    assert result.exit_code == 0, result.output
+    assert "Orphan Kid" in result.output
+
+
+def test_documents_tree_invalid_depth_exits_nonzero():
+    # depth=0 is rejected (depth < 1).
+    find_mock = AsyncMock(side_effect=[TREE_TEAMSPACES, TREE_DOCS])
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["documents", "tree", "--depth", "0"])
+    assert result.exit_code == 1
+
+
 # ── components list ────────────────────────────────────────────────────────────
 
 COMPONENT_DATA = [
