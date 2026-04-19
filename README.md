@@ -188,8 +188,13 @@ huly documents create --space "Engineering" --title "Design Doc"
 huly documents describe DOC_ID --set "# Design\n\nContent here."
 huly documents describe DOC_ID --set-file ./doc.md
 huly documents update DOC_ID --title "Updated Title"
+huly documents duplicate DOC_ID --title "Weekly Status — 2026-04-19"
 huly documents delete DOC_ID
 ```
+
+`documents duplicate` copies a source document into a new one in a single
+command — useful for instantiating template-style docs. It inherits the
+source's space and parent by default; pass `--space` or `--parent` to override.
 
 ### Components
 

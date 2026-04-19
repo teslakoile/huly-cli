@@ -94,6 +94,70 @@ async def _find_document_by_id(client: HulyClient, doc_id: str) -> Document:
     return Document.model_validate(raw[0])
 
 
+async def _read_doc_markdown(client: HulyClient, doc: Document) -> str:
+    """Read a document's content and return it as markdown.
+
+    Mirrors the non-raw read path used by ``documents describe``:
+    honors the inline-vs-blob branch and falls through to an empty string
+    when the doc has no content.
+    """
+    from huly_cli.markup import prosemirror_to_markdown
+
+    if not doc.content:
+        return ""
+    if _is_inline_markup(doc.content):
+        content = doc.content
+    else:
+        content = await client.get_content(
+            "document:class:Document", doc.id, "content", doc.content
+        )
+    if not content:
+        return ""
+    return prosemirror_to_markdown(content)
+
+
+async def _write_markdown_to_doc(
+    client: HulyClient, auth: Any, doc: Document, markdown_content: str
+) -> None:
+    """Write markdown content to an existing document.
+
+    Mirrors the write path used by ``documents describe --set-file``:
+    uses ``set_content`` when a blob ref already exists, otherwise
+    calls ``create_content`` then patches the ``content`` field via tx.
+    """
+    from huly_cli.markup import markdown_to_prosemirror
+
+    markup = markdown_to_prosemirror(markdown_content or "")
+    if doc.content and not _is_inline_markup(doc.content):
+        ok = await client.set_content(
+            "document:class:Document", doc.id, "content", doc.content, markup
+        )
+        if not ok:
+            raise HulyError("Failed to update content via Collaborator RPC.")
+        return
+
+    blob_ref = await client.create_content(
+        "document:class:Document",
+        doc.id,
+        "content",
+        markup,
+        warn_on_error=False,
+    )
+    if blob_ref is None:
+        raise HulyError("Failed to create content via Collaborator.")
+    await client.tx(
+        {
+            "_class": "core:class:TxUpdateDoc",
+            "objectClass": "document:class:Document",
+            "objectSpace": doc.space,
+            "objectId": doc.id,
+            "operations": {"content": blob_ref},
+            "modifiedBy": auth.account_id,
+            "modifiedOn": int(time.time() * 1000),
+        }
+    )
+
+
 # ── Commands ──────────────────────────────────────────────────────────────────
 
 
@@ -336,39 +400,10 @@ def docs_describe(
             markdown_content = p.read_text(encoding="utf-8")
 
         async def _write() -> str:
-            from huly_cli.markup import markdown_to_prosemirror
-
             auth = await ensure_auth(config)
             async with HulyClient(config, auth) as client:
-                markup = markdown_to_prosemirror(markdown_content or "")
                 doc = await _find_document_by_id(client, doc_id)
-                if doc.content and not _is_inline_markup(doc.content):
-                    ok = await client.set_content(
-                        "document:class:Document", doc.id, "content", doc.content, markup
-                    )
-                    if not ok:
-                        raise HulyError("Failed to update content via Collaborator RPC.")
-                else:
-                    blob_ref = await client.create_content(
-                        "document:class:Document",
-                        doc.id,
-                        "content",
-                        markup,
-                        warn_on_error=False,
-                    )
-                    if blob_ref is None:
-                        raise HulyError("Failed to create content via Collaborator.")
-                    await client.tx(
-                        {
-                            "_class": "core:class:TxUpdateDoc",
-                            "objectClass": "document:class:Document",
-                            "objectSpace": doc.space,
-                            "objectId": doc.id,
-                            "operations": {"content": blob_ref},
-                            "modifiedBy": auth.account_id,
-                            "modifiedOn": int(time.time() * 1000),
-                        }
-                    )
+                await _write_markdown_to_doc(client, auth, doc, markdown_content or "")
             return doc.title or doc_id
 
         try:
@@ -447,6 +482,107 @@ def docs_describe(
 
             plain = prosemirror_to_text(content)
             console.print(Panel(plain or "(empty content)", title=f"Content: {title_label}"))
+
+
+@app.command("duplicate")
+def docs_duplicate(
+    ctx: typer.Context,
+    doc_id: str = typer.Argument(..., help="Source document internal ID."),
+    title: Annotated[str, typer.Option("--title", help="Title for the new document.")] = ...,
+    space: Annotated[
+        str | None,
+        typer.Option("--space", help="Teamspace name. Defaults to the source's space."),
+    ] = None,
+    parent: Annotated[
+        str | None,
+        typer.Option(
+            "--parent",
+            help="Parent document ID. Defaults to the source's parent.",
+        ),
+    ] = None,
+) -> None:
+    """Duplicate a document, copying its content into a new document.
+
+    Reads the source document's metadata and markdown content, creates a new
+    document in the target (or inherited) space/parent, and writes the content
+    into it. Prints the new document ID; with ``--json`` returns the full record.
+    """
+    overrides: dict = ctx.obj or {}
+    config = load_config(
+        url_override=overrides.get("url"),
+        workspace_override=overrides.get("workspace"),
+    )
+
+    async def _run() -> dict[str, Any]:
+        auth = await ensure_auth(config)
+        async with HulyClient(config, auth) as client:
+            source = await _find_document_by_id(client, doc_id)
+
+            # Resolve target space: inherit source when --space not given.
+            if space is None:
+                target_space_id = source.space
+            else:
+                target_space_id = await _resolve_teamspace_by_name(client, space)
+
+            # Resolve target parent: inherit source when --parent not given.
+            target_parent_id = parent if parent is not None else source.parent
+            if not target_parent_id:
+                target_parent_id = "document:ids:NoParent"
+
+            # Read source content as markdown (same path as describe non-raw).
+            markdown_content = await _read_doc_markdown(client, source)
+
+            # Create the new doc shell.
+            new_id = secrets.token_hex(12)
+            await client.tx(
+                {
+                    "_class": "core:class:TxCreateDoc",
+                    "objectClass": "document:class:Document",
+                    "objectSpace": target_space_id,
+                    "objectId": new_id,
+                    "attributes": {
+                        "title": title,
+                        "content": "",
+                        "parent": target_parent_id,
+                        "attachments": 0,
+                        "embeddings": 0,
+                        "labels": 0,
+                        "comments": 0,
+                        "references": 0,
+                        "rank": "",
+                    },
+                    "modifiedBy": auth.account_id,
+                    "modifiedOn": int(time.time() * 1000),
+                }
+            )
+
+            # Copy content into the new doc (same path as --set-file).
+            if markdown_content:
+                new_doc = await _find_document_by_id(client, new_id)
+                await _write_markdown_to_doc(client, auth, new_doc, markdown_content)
+
+            if is_json_mode():
+                new_doc = await _find_document_by_id(client, new_id)
+                space_map = await _fetch_teamspace_map(client)
+                return _doc_to_detail(new_doc, space_map)
+            return {"id": new_id}
+
+    try:
+        data = asyncio.run(_run())
+    except NotFoundError as e:
+        print_error(e.message)
+        raise typer.Exit(1) from e
+    except AuthError as e:
+        print_error(e.message, hint="Run 'huly auth login' to authenticate.")
+        raise typer.Exit(2) from e
+    except HulyError as e:
+        print_error(e.message)
+        raise typer.Exit(1) from e
+
+    if is_json_mode():
+        print_item(data, title=f"Document: {data.get('title', data.get('id', ''))}")
+    else:
+        print_success(f"Document duplicated (id: {data['id']})")
 
 
 @app.command("delete")
