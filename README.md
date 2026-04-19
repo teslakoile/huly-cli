@@ -30,6 +30,10 @@ Additional capabilities:
   across every class in the workspace, with optional `--class` filters and a
   class-scoped wrapper at `huly issues search`.
 - **JSON mode**: `huly --json <command>` for machine-readable output
+- **Full IDs in tables**: `id` and `parent` columns in list output never
+  truncate to `…` — values are always copy-pasteable into subsequent commands
+- **Agent-friendly markdown**: `huly documents describe DOC_ID --markdown`
+  emits plain GFM with no Rich box or reflow
 - **Self-upgrade**: `huly upgrade` to update from PyPI
 - **Shell completion**: `huly --install-completion`
 
@@ -188,8 +192,16 @@ huly issues delete DEMO-1
 ```bash
 huly documents list --space "Engineering"
 huly documents create --space "Engineering" --title "Design Doc"
+
+# Read content
+huly documents describe DOC_ID              # rendered markdown in a Rich panel
+huly documents describe DOC_ID --markdown   # plain GFM to stdout — safe to pipe, diff, or feed back into --set-file
+huly documents describe DOC_ID --raw        # raw ProseMirror JSON
+
+# Write content
 huly documents describe DOC_ID --set "# Design\n\nContent here."
 huly documents describe DOC_ID --set-file ./doc.md
+
 huly documents update DOC_ID --title "Updated Title"
 huly documents delete DOC_ID
 
@@ -220,6 +232,10 @@ huly documents describe DOC_ID --set-raw-file ./doc.pm.json
 The four write flags (`--set`, `--set-file`, `--set-raw`, `--set-raw-file`)
 are mutually exclusive; invalid JSON or a non-`doc` root is rejected before
 any network IO.
+
+`--markdown` is the preferred read path for agents: no Rich box, no reflow, no
+ellipsis truncation, and the output round-trips cleanly back into `--set-file`.
+`--raw` and `--markdown` are mutually exclusive.
 
 ### Components
 
