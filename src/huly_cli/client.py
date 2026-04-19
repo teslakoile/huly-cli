@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json as json_mod
+import re
 import time
 import urllib.parse
 from typing import Any
@@ -17,6 +18,19 @@ from huly_cli.output import print_warning
 # Retry settings for Collaborator RPC (server 500s)
 _RETRY_MAX_ATTEMPTS = 3
 _RETRY_BASE_DELAY = 1.0  # seconds; doubles each attempt
+
+
+def _doc_class(doc: dict[str, Any]) -> str | None:
+    """Extract the ``_class`` from a fulltext search hit.
+
+    Server hits carry the class as ``doc._class`` (nested one level) — the
+    top-level ``_class`` is the wrapper-document class, not the underlying
+    entity's.
+    """
+    inner = doc.get("doc")
+    if isinstance(inner, dict):
+        return inner.get("_class")
+    return None
 
 
 class HulyClient:
@@ -73,6 +87,70 @@ class HulyClient:
         """GET /api/v1/account/{workspace_id} — current user account info."""
         resp = await self._http.get(f"/api/v1/account/{self._auth.workspace_id}")
         return self._handle_response(resp)
+
+    async def fulltext_search(
+        self,
+        query: str,
+        limit: int = 25,
+        classes: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Query the server fulltext index via GET /api/v1/search-fulltext.
+
+        The upstream server returns a JSON body whose closing brace is
+        truncated — ``Content-Length`` is correct but the tail is cut at
+        ``"total":1`` with the final ``}`` missing. Extracting the ``"docs":
+        [...]`` array with a regex sidesteps the truncation entirely (the
+        array itself is always complete, well-formed JSON).
+
+        ``classes`` filters client-side on each doc's ``doc._class`` because
+        the server's ``&classes=`` query parameter is not reliable.
+        """
+        params: list[tuple[str, str]] = [("query", query), ("limit", str(limit))]
+        resp = await self._http.get(
+            f"/api/v1/search-fulltext/{self._auth.workspace_id}",
+            params=params,
+        )
+
+        # Reuse the status-code handling from `_handle_response` but do NOT
+        # try to parse the body with ``resp.json()`` — it is truncated.
+        if resp.status_code in (401, 403):
+            raise AuthError(
+                f"Authentication failed (HTTP {resp.status_code}). Run 'huly auth login'."
+            )
+        if resp.status_code == 429:
+            retry_after_header = resp.headers.get("Retry-After")
+            if retry_after_header is not None:
+                try:
+                    retry_after = float(retry_after_header)
+                except ValueError:
+                    retry_after = 0.0
+            else:
+                try:
+                    retry_after = float(resp.headers.get("Retry-After-ms", 0)) / 1000.0
+                except ValueError:
+                    retry_after = 0.0
+            raise RateLimitError("Rate limit exceeded.", retry_after=retry_after)
+        if resp.status_code >= 500:
+            raise ServerError(f"Server error (HTTP {resp.status_code}): {resp.text[:200]}")
+        resp.raise_for_status()
+
+        body = resp.text
+        # DOTALL so ``.`` matches newlines that may appear inside titles.
+        match = re.search(r'"docs":(\[.*\])', body, flags=re.DOTALL)
+        if match is None:
+            return []
+        try:
+            docs = json_mod.loads(match.group(1))
+        except json_mod.JSONDecodeError:
+            return []
+        if not isinstance(docs, list):
+            return []
+        docs = [doc for doc in docs if isinstance(doc, dict)]
+
+        if classes:
+            wanted = set(classes)
+            docs = [doc for doc in docs if _doc_class(doc) in wanted]
+        return docs
 
     # ── Collaborator RPC ──────────────────────────────────────────────────────
 
