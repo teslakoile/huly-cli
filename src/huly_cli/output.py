@@ -41,14 +41,30 @@ def print_item(data: dict[str, Any], title: str = "") -> None:
             console.print(Pretty(data))
 
 
+#: Columns whose values are IDs/refs that must never be truncated with an
+#: ellipsis — a truncated ID is useless (you can't use it to look the row up).
+#: Rich's default `overflow="ellipsis"` produces e.g. `69cba04d0122c97…`; we
+#: set `no_wrap=True` so Rich widens the column to fit the full ID on one line
+#: (other columns wrap to absorb any squeeze on narrow terminals).
+_NO_TRUNCATE_COLUMNS: frozenset[str] = frozenset({"id", "parent"})
+
+
 def print_list(items: list[dict[str, Any]], columns: list[str], title: str = "") -> None:
-    """Print a list of items. JSON: envelope with data array. Human: Rich table."""
+    """Print a list of items. JSON: envelope with data array. Human: Rich table.
+
+    Columns named ``id`` or ``parent`` render without Rich's ellipsis
+    truncation — full values always appear so they can be copied and reused
+    (a truncated Huly ID is not a valid lookup key).
+    """
     if _json_mode:
         print(json.dumps({"ok": True, "data": items}))
     else:
         table = Table(title=title or None, show_header=True, header_style="bold")
         for col in columns:
-            table.add_column(col)
+            if col in _NO_TRUNCATE_COLUMNS:
+                table.add_column(col, no_wrap=True, overflow="fold")
+            else:
+                table.add_column(col)
         for item in items:
             row = [str(item.get(col, "")) for col in columns]
             table.add_row(*row)
