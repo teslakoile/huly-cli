@@ -1,4 +1,4 @@
-"""Documents commands: list, get, create, update, describe."""
+"""Documents commands: list, get, create, update, describe, tree."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import time
 from typing import Annotated, Any
 
 import typer
+from rich.tree import Tree
 
 from huly_cli.auth import ensure_auth
 from huly_cli.client import HulyClient
@@ -24,6 +25,8 @@ from huly_cli.output import (
     print_success,
     print_warning,
 )
+
+NO_PARENT = "document:ids:NoParent"
 
 app = typer.Typer(help="Manage Huly documents.", no_args_is_help=True)
 
@@ -209,6 +212,227 @@ def docs_list(
         raise typer.Exit(1) from e
 
     print_list(rows, columns=["title", "space", "parent", "id"], title="Documents")
+
+
+# ── tree helpers ─────────────────────────────────────────────────────────────
+
+
+def _normalize_parent(parent: str | None) -> str:
+    """Treat empty string and the sentinel NoParent value as 'no parent'."""
+    if not parent or parent == NO_PARENT:
+        return ""
+    return parent
+
+
+def _build_children_index(docs: list[Document]) -> dict[str, list[Document]]:
+    """Group docs by normalized parent id.
+
+    Orphans (parent points to an ID that isn't in the fetched set) are bucketed
+    under "" (no parent) so they render under their space root instead of
+    vanishing.
+    """
+    ids = {d.id for d in docs}
+    index: dict[str, list[Document]] = {}
+    for doc in docs:
+        parent = _normalize_parent(doc.parent)
+        if parent and parent not in ids:
+            parent = ""  # orphan → attach to synthetic root
+        index.setdefault(parent, []).append(doc)
+    # Sort siblings by rank ascending (same order as Huly UI).
+    for siblings in index.values():
+        siblings.sort(key=lambda d: (d.rank or "", d.title or ""))
+    return index
+
+
+def _doc_to_tree_node(
+    doc: Document,
+    children_index: dict[str, list[Document]],
+    *,
+    remaining: int | None,
+    visited: set[str],
+) -> dict[str, Any]:
+    """Recursively build a {id, title, children: [...]} node.
+
+    ``remaining`` is the number of document levels still allowed starting at
+    this node (``None`` = unlimited). When it reaches ``1`` the current doc is
+    emitted with no children; when ``0`` the node is still emitted but recursion
+    below it stops. Cycles are broken on first re-visit.
+    """
+    node: dict[str, Any] = {"id": doc.id, "title": doc.title, "children": []}
+    if doc.id in visited:
+        return node
+    visited = visited | {doc.id}
+
+    if remaining is not None and remaining <= 1:
+        return node
+
+    next_remaining = None if remaining is None else remaining - 1
+    for child in children_index.get(doc.id, []):
+        node["children"].append(
+            _doc_to_tree_node(
+                child,
+                children_index,
+                remaining=next_remaining,
+                visited=visited,
+            )
+        )
+    return node
+
+
+def _render_tree_node(node: dict[str, Any], parent: Tree) -> None:
+    branch = parent.add(f"{node['title']} [dim]({node['id']})[/dim]")
+    for child in node["children"]:
+        _render_tree_node(child, branch)
+
+
+@app.command("tree")
+def docs_tree(
+    ctx: typer.Context,
+    space: Annotated[
+        str | None,
+        typer.Option("--space", "-s", help="Filter by teamspace name."),
+    ] = None,
+    root: Annotated[
+        str | None,
+        typer.Option("--root", help="Render subtree rooted at this document ID."),
+    ] = None,
+    depth: Annotated[
+        int | None,
+        typer.Option(
+            "--depth",
+            help=(
+                "Cap recursion. Without --root, N = number of document levels "
+                "under each space (1 = top-level docs only). With --root, the "
+                "root itself counts as level 1 (tree -L N semantics)."
+            ),
+        ),
+    ] = None,
+    limit: Annotated[
+        int,
+        typer.Option(
+            "--limit",
+            "-n",
+            help="Maximum number of documents to fetch for building the tree.",
+        ),
+    ] = 1000,
+) -> None:
+    """Render documents hierarchically via the existing parent field.
+
+    Without flags, renders all spaces, grouped by teamspace root. ``--space``
+    narrows to one teamspace; ``--root`` renders a subtree under a single
+    document (takes precedence over ``--space``). ``--depth`` caps recursion.
+    """
+    if depth is not None and depth < 1:
+        print_error("--depth must be >= 1.")
+        raise typer.Exit(1)
+
+    overrides: dict = ctx.obj or {}
+    config = load_config(
+        url_override=overrides.get("url"),
+        workspace_override=overrides.get("workspace"),
+    )
+
+    async def _run() -> tuple[list[dict[str, Any]] | dict[str, Any], bool]:
+        """Return (payload, is_single_root)."""
+        auth = await ensure_auth(config)
+        async with HulyClient(config, auth) as client:
+            space_map = await _fetch_teamspace_map(client)
+
+            query: dict[str, Any] = {}
+            filter_space_id: str | None = None
+            if root is not None:
+                # --root takes precedence; fetch just that document's space.
+                root_doc = await _find_document_by_id(client, root)
+                query["space"] = root_doc.space
+                filter_space_id = root_doc.space
+            elif space:
+                filter_space_id = await _resolve_teamspace_by_name(client, space)
+                query["space"] = filter_space_id
+
+            raw = await client.find_all(
+                "document:class:Document",
+                query=query,
+                options={"limit": limit},
+            )
+            docs = [Document.model_validate(d) for d in raw]
+
+        children_index = _build_children_index(docs)
+
+        if root is not None:
+            # Single subtree rooted at the requested document.
+            root_doc = next((d for d in docs if d.id == root), None)
+            if root_doc is None:
+                raise NotFoundError(f"Document '{root}' not found.")
+            node = _doc_to_tree_node(
+                root_doc,
+                children_index,
+                remaining=depth,
+                visited=set(),
+            )
+            return node, True
+
+        # All-spaces or --space: group by space, each space is a root.
+        if filter_space_id is not None:
+            space_ids = [filter_space_id]
+        else:
+            space_ids = sorted({d.space for d in docs})
+
+        roots: list[dict[str, Any]] = []
+        for sid in space_ids:
+            space_name = space_map.get(sid, sid)
+            space_node: dict[str, Any] = {
+                "id": sid,
+                "title": space_name,
+                "children": [],
+            }
+            top_docs = [d for d in children_index.get("", []) if d.space == sid]
+            for doc in top_docs:
+                space_node["children"].append(
+                    _doc_to_tree_node(
+                        doc,
+                        children_index,
+                        remaining=depth,
+                        visited=set(),
+                    )
+                )
+            roots.append(space_node)
+
+        return roots, False
+
+    try:
+        payload, single_root = asyncio.run(_run())
+    except NotFoundError as e:
+        print_error(e.message)
+        raise typer.Exit(1) from e
+    except AuthError as e:
+        print_error(e.message, hint="Run 'huly auth login' to authenticate.")
+        raise typer.Exit(2) from e
+    except HulyError as e:
+        print_error(e.message)
+        raise typer.Exit(1) from e
+
+    if is_json_mode():
+        envelope: dict[str, Any] = {"ok": True, "data": payload}
+        print(json.dumps(envelope))
+        return
+
+    if single_root:
+        assert isinstance(payload, dict)
+        tree = Tree(f"{payload['title']} [dim]({payload['id']})[/dim]")
+        for child in payload["children"]:
+            _render_tree_node(child, tree)
+        console.print(tree)
+        return
+
+    assert isinstance(payload, list)
+    if not payload:
+        console.print("[dim](no documents)[/dim]")
+        return
+    for space_node in payload:
+        tree = Tree(f"[bold]{space_node['title']}[/bold] [dim]({space_node['id']})[/dim]")
+        for child in space_node["children"]:
+            _render_tree_node(child, tree)
+        console.print(tree)
 
 
 @app.command("get")

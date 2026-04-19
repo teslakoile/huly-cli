@@ -147,7 +147,7 @@ Current implemented command groups:
 - `auth` — login, status
 - `projects` — list, get
 - `issues` — list, get, create, update, delete, describe, search
-- `documents` — list, get, create, update, delete, describe, duplicate
+- `documents` — list, get, create, update, delete, describe, tree, duplicate
 - `components` — list, get, create, update, delete
 - `milestones` — list, get, create, update, delete
 - `templates` — list, get, describe (read/write)
@@ -191,6 +191,15 @@ huly documents duplicate TEMPLATE_DOC_ID \
 `documents duplicate` inherits the source document's space and parent by
 default and copies its markdown content into the new doc in one call. Pass
 `--space "Name"` or `--parent DOC_ID` to override those defaults.
+
+Document hierarchy with `documents tree`:
+
+- `huly documents tree` — every space, grouped by teamspace root
+- `huly documents tree --space "Engineering"` — one teamspace
+- `huly documents tree --root DOC_ID` — subtree under one document
+  (takes precedence over `--space`)
+- `--depth N` — cap recursion (1 = direct children only)
+- `huly --json documents tree` — nested `{id, title, children}` JSON
 
 ### Fulltext search
 
