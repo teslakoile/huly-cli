@@ -27,6 +27,10 @@ Additional capabilities:
 - **Status filtering**: `issues list --status <name>` resolves against the live
   workspace status index, supporting custom statuses
 - **JSON mode**: `huly --json <command>` for machine-readable output
+- **Full IDs in tables**: `id` and `parent` columns in list output never
+  truncate to `…` — values are always copy-pasteable into subsequent commands
+- **Agent-friendly markdown**: `huly documents describe DOC_ID --markdown`
+  emits plain GFM with no Rich box or reflow
 - **Self-upgrade**: `huly upgrade` to update from PyPI
 - **Shell completion**: `huly --install-completion`
 
@@ -185,11 +189,23 @@ huly issues delete DEMO-1
 ```bash
 huly documents list --space "Engineering"
 huly documents create --space "Engineering" --title "Design Doc"
+
+# Read content
+huly documents describe DOC_ID              # rendered markdown in a Rich panel
+huly documents describe DOC_ID --markdown   # plain GFM to stdout — safe to pipe, diff, or feed back into --set-file
+huly documents describe DOC_ID --raw        # raw ProseMirror JSON
+
+# Write content
 huly documents describe DOC_ID --set "# Design\n\nContent here."
 huly documents describe DOC_ID --set-file ./doc.md
+
 huly documents update DOC_ID --title "Updated Title"
 huly documents delete DOC_ID
 ```
+
+`--markdown` is the preferred read path for agents: no Rich box, no reflow, no
+ellipsis truncation, and the output round-trips cleanly back into `--set-file`.
+`--raw` and `--markdown` are mutually exclusive.
 
 ### Components
 
