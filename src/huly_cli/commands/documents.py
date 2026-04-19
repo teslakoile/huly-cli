@@ -588,6 +588,13 @@ def docs_describe(
         bool,
         typer.Option("--raw", help="Show raw ProseMirror JSON instead of rendered markdown."),
     ] = False,
+    markdown: Annotated[
+        bool,
+        typer.Option(
+            "--markdown",
+            help="Emit plain GFM markdown to stdout (no Rich box/reflow) — agent-friendly.",
+        ),
+    ] = False,
     set_text: Annotated[
         str | None,
         typer.Option("--set", help="Set content from markdown string."),
@@ -600,9 +607,14 @@ def docs_describe(
     """Read or update the content of a document.
 
     By default, reads and displays the content. Use --set or --set-file to write.
+    Use --markdown to emit plain GFM (no Rich panel), which is safe to diff,
+    grep, or feed back into `--set-file`.
     """
     if set_text is not None and set_file is not None:
         print_error("Use either --set or --set-file, not both.")
+        raise typer.Exit(1)
+    if raw and markdown:
+        print_error("Use either --raw or --markdown, not both.")
         raise typer.Exit(1)
 
     overrides: dict = ctx.obj or {}
@@ -692,6 +704,13 @@ def docs_describe(
             console.print_json(json.dumps(parsed, indent=2))
         except (json.JSONDecodeError, TypeError):
             console.print(content)
+    elif markdown:
+        # Plain GFM to stdout — no Rich box, no reflow. Agent-friendly and safe
+        # to round-trip back through `--set` / `--set-file`.
+        from huly_cli.markup import prosemirror_to_markdown
+
+        md_text = prosemirror_to_markdown(content)
+        print(md_text)
     else:
         from rich.markdown import Markdown
         from rich.panel import Panel

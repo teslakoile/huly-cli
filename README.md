@@ -30,6 +30,10 @@ Additional capabilities:
   across every class in the workspace, with optional `--class` filters and a
   class-scoped wrapper at `huly issues search`.
 - **JSON mode**: `huly --json <command>` for machine-readable output
+- **Full IDs in tables**: `id` and `parent` columns in list output never
+  truncate to `…` — values are always copy-pasteable into subsequent commands
+- **Agent-friendly markdown**: `huly documents describe DOC_ID --markdown`
+  emits plain GFM with no Rich box or reflow
 - **Self-upgrade**: `huly upgrade` to update from PyPI
 - **Shell completion**: `huly --install-completion`
 
@@ -188,8 +192,16 @@ huly issues delete DEMO-1
 ```bash
 huly documents list --space "Engineering"
 huly documents create --space "Engineering" --title "Design Doc"
+
+# Read content
+huly documents describe DOC_ID              # rendered markdown in a Rich panel
+huly documents describe DOC_ID --markdown   # plain GFM to stdout — safe to pipe, diff, or feed back into --set-file
+huly documents describe DOC_ID --raw        # raw ProseMirror JSON
+
+# Write content
 huly documents describe DOC_ID --set "# Design\n\nContent here."
 huly documents describe DOC_ID --set-file ./doc.md
+
 huly documents update DOC_ID --title "Updated Title"
 huly documents duplicate DOC_ID --title "Weekly Status — 2026-04-19"
 huly documents delete DOC_ID
@@ -205,6 +217,10 @@ huly --json documents tree                      # nested JSON output
 `documents duplicate` copies a source document into a new one in a single
 command — useful for instantiating template-style docs. It inherits the
 source's space and parent by default; pass `--space` or `--parent` to override.
+
+`--markdown` is the preferred read path for agents: no Rich box, no reflow, no
+ellipsis truncation, and the output round-trips cleanly back into `--set-file`.
+`--raw` and `--markdown` are mutually exclusive.
 
 ### Components
 

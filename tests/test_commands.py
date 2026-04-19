@@ -1361,3 +1361,182 @@ def test_components_update_not_found_exits_nonzero():
 
     assert result.exit_code == 1
     tx_mock.assert_not_awaited()
+
+
+# ── ID column truncation (issue #38) ──────────────────────────────────────────
+#
+# A truncated Huly ID is useless: `huly documents get 69cba04d0122c97…` returns
+# "not found". The tests below are snapshot-ish guards that regress if Rich's
+# default ellipsis overflow sneaks back in for ID / parent columns.
+
+LONG_DOC_ID = "69cba08c0122c97fabcdef34"
+LONG_PARENT_ID = "69cba04d0122c97fabcdef12"
+
+LONG_ID_DOCUMENT_DATA = [
+    {
+        "_id": LONG_DOC_ID,
+        "title": "[Template] Weekly Project Status",
+        "content": "blob-ref-123",
+        "space": "ts1",
+        "parent": LONG_PARENT_ID,
+        "attachments": 0,
+        "labels": 0,
+        "comments": 0,
+        "rank": "",
+        "createdBy": "",
+        "createdOn": 0,
+        "modifiedBy": "",
+        "modifiedOn": 0,
+    }
+]
+
+
+def test_documents_list_shows_full_id_no_ellipsis():
+    """ID column must render the full 24-char ID; `…` truncation is a regression."""
+    find_mock = AsyncMock(side_effect=[TEAMSPACE_DATA, LONG_ID_DOCUMENT_DATA])
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["documents", "list"])
+    assert result.exit_code == 0, result.output
+    # The full ID must be present exactly — not truncated to e.g. `69cba08c0122c97f…`.
+    assert LONG_DOC_ID in result.output
+    # A truncated prefix + ellipsis is the bug from issue #38. Assert neither
+    # the Unicode nor the ASCII truncation marker ever appears in the ID.
+    assert "…" not in result.output
+    assert "0122c97..." not in result.output
+
+
+def test_documents_list_shows_full_parent_id_no_ellipsis():
+    """`parent` is also an ID — it must not be truncated either."""
+    find_mock = AsyncMock(side_effect=[TEAMSPACE_DATA, LONG_ID_DOCUMENT_DATA])
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["documents", "list"])
+    assert result.exit_code == 0, result.output
+    assert LONG_PARENT_ID in result.output
+
+
+def test_issues_list_still_renders_identifier_after_truncation_fix():
+    """Sanity: the no-truncate change in print_list must not break other tables.
+
+    `issues list` has no `id` column, but it has `identifier` (e.g. TP-1) and
+    other columns that still wrap/truncate normally.
+    """
+    find_mock = AsyncMock(side_effect=[ISSUE_DATA, []])
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["issues", "list"])
+    assert result.exit_code == 0, result.output
+    # Full issue identifier must be intact (it's short, but this pins the
+    # behaviour so future refactors of print_list can't silently swallow it).
+    assert "TP-1" in result.output
+    assert "TP-1…" not in result.output
+
+
+def test_components_list_shows_full_id_no_ellipsis():
+    """Components list `id` column must also render the full 24-char ID."""
+    long_id = "69cba0aa0122c97fcomponent"
+    component_data = [
+        {
+            "_id": long_id,
+            "label": "Auth Service",
+            "description": "Handles auth",
+            "lead": None,
+            "space": "proj1",
+            "createdBy": "",
+            "createdOn": 0,
+            "modifiedBy": "",
+            "modifiedOn": 0,
+        }
+    ]
+    find_mock = AsyncMock(side_effect=[component_data, []])
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["components", "list"])
+    assert result.exit_code == 0, result.output
+    assert long_id in result.output
+    assert "…" not in result.output
+
+
+# ── documents describe --markdown (issue #38) ────────────────────────────────
+#
+# `--raw` dumps ProseMirror JSON; the default renders through a Rich panel that
+# reflows tables. `--markdown` must emit plain GFM to stdout with no box chars.
+
+PROSE_CONTENT = (
+    '{"type":"doc","content":['
+    '{"type":"heading","attrs":{"level":1},"content":[{"type":"text","text":"Hello"}]},'
+    '{"type":"paragraph","content":[{"type":"text","text":"Body text."}]}'
+    "]}"
+)
+
+DOCUMENT_WITH_INLINE_CONTENT = [
+    {
+        "_id": "doc1",
+        "title": "My Doc",
+        "content": PROSE_CONTENT,  # starts with `{` → treated as inline markup, no blob fetch
+        "space": "ts1",
+        "parent": "document:ids:NoParent",
+        "attachments": 0,
+        "labels": 0,
+        "comments": 0,
+        "rank": "",
+        "createdBy": "",
+        "createdOn": 0,
+        "modifiedBy": "",
+        "modifiedOn": 0,
+    }
+]
+
+
+def test_documents_describe_markdown_emits_plain_gfm():
+    """`documents describe --markdown` writes plain GFM to stdout (no Rich box)."""
+    from huly_cli.output import set_json_mode
+
+    set_json_mode(False)  # isolate from any prior `--json` test leaking state.
+    find_mock = AsyncMock(return_value=DOCUMENT_WITH_INLINE_CONTENT)
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["documents", "describe", "doc1", "--markdown"])
+    assert result.exit_code == 0, result.output
+    # Markdown heading / body must be present.
+    assert "# Hello" in result.output
+    assert "Body text." in result.output
+    # No Rich panel borders (heavy box or rounded) — those would indicate the
+    # old Panel/Markdown path leaked through.
+    for box_char in ("╭", "╮", "╰", "╯", "┏", "┓", "┗", "┛", "━"):
+        assert box_char not in result.output, (
+            f"Rich box char {box_char!r} leaked into --markdown output"
+        )
+    # No panel title wrapper like `Content: My Doc`.
+    assert "Content: My Doc" not in result.output
+
+
+def test_documents_describe_markdown_conflicts_with_raw():
+    """`--raw` and `--markdown` are mutually exclusive — mirrors the existing
+    `--set` / `--set-file` mutual-exclusion check in the same command."""
+    result = runner.invoke(app, ["documents", "describe", "doc1", "--raw", "--markdown"])
+    assert result.exit_code == 1
+    # Error message should make the exclusivity clear.
+    assert "either" in result.output.lower() or "not both" in result.output.lower()
+
+
+def test_documents_describe_default_still_renders_panel():
+    """Default (no --markdown, no --raw) keeps the Rich panel rendering."""
+    from huly_cli.output import set_json_mode
+
+    set_json_mode(False)  # isolate from any prior `--json` test leaking state.
+    find_mock = AsyncMock(return_value=DOCUMENT_WITH_INLINE_CONTENT)
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["documents", "describe", "doc1"])
+    assert result.exit_code == 0, result.output
+    # Panel title appears in the default human rendering.
+    assert "Content:" in result.output
+
+
+def test_documents_describe_markdown_json_mode_still_emits_envelope():
+    """In JSON mode, --markdown is redundant; output stays a JSON envelope."""
+    import json as json_mod
+
+    find_mock = AsyncMock(return_value=DOCUMENT_WITH_INLINE_CONTENT)
+    with _auth_patch(), patch("huly_cli.client.HulyClient.find_all", find_mock):
+        result = runner.invoke(app, ["--json", "documents", "describe", "doc1", "--markdown"])
+    assert result.exit_code == 0, result.output
+    data = json_mod.loads(result.output)
+    assert data["ok"] is True
+    assert "# Hello" in data["content"]
