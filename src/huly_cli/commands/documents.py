@@ -292,6 +292,28 @@ def docs_update(
         raise typer.Exit(1) from e
 
 
+def _validate_prosemirror_root(raw: str) -> dict:
+    """Validate that `raw` is a ProseMirror doc JSON string.
+
+    Returns the parsed dict on success. Raises typer.Exit(1) with a clear
+    error message on invalid JSON or non-doc root structure.
+    """
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as e:
+        print_error(f"Invalid ProseMirror JSON: {e}")
+        raise typer.Exit(1) from e
+
+    if (
+        not isinstance(parsed, dict)
+        or parsed.get("type") != "doc"
+        or not isinstance(parsed.get("content"), list)
+    ):
+        print_error('Invalid ProseMirror document: root must be {"type": "doc", "content": [...]}')
+        raise typer.Exit(1)
+    return parsed
+
+
 @app.command("describe")
 def docs_describe(
     ctx: typer.Context,
@@ -308,13 +330,31 @@ def docs_describe(
         str | None,
         typer.Option("--set-file", help="Set content from a markdown file path."),
     ] = None,
+    set_raw: Annotated[
+        str | None,
+        typer.Option(
+            "--set-raw",
+            help="Set content from a raw ProseMirror JSON string (skips markdown parsing).",
+        ),
+    ] = None,
+    set_raw_file: Annotated[
+        str | None,
+        typer.Option(
+            "--set-raw-file",
+            help="Set content from a raw ProseMirror JSON file (skips markdown parsing).",
+        ),
+    ] = None,
 ) -> None:
     """Read or update the content of a document.
 
-    By default, reads and displays the content. Use --set or --set-file to write.
+    By default, reads and displays the content. Use --set or --set-file to
+    write markdown. Use --set-raw or --set-raw-file to write ProseMirror JSON
+    directly (escape hatch for features the markdown parser does not cover).
     """
-    if set_text is not None and set_file is not None:
-        print_error("Use either --set or --set-file, not both.")
+    write_flags = (set_text, set_file, set_raw, set_raw_file)
+    provided = sum(1 for f in write_flags if f is not None)
+    if provided > 1:
+        print_error("Use only one of --set, --set-file, --set-raw, --set-raw-file.")
         raise typer.Exit(1)
 
     overrides: dict = ctx.obj or {}
@@ -324,23 +364,39 @@ def docs_describe(
     )
 
     # ── Write path ────────────────────────────────────────────────────────
-    if set_text is not None or set_file is not None:
-        markdown_content = set_text
-        if set_file is not None:
-            import pathlib
+    if provided == 1:
+        import pathlib
 
+        # Resolve the final markup string based on which flag was used.
+        if set_raw is not None:
+            _validate_prosemirror_root(set_raw)
+            markup_payload = set_raw
+        elif set_raw_file is not None:
+            p = pathlib.Path(set_raw_file)
+            if not p.exists():
+                print_error(f"File not found: {set_raw_file}")
+                raise typer.Exit(1)
+            raw_text = p.read_text(encoding="utf-8")
+            _validate_prosemirror_root(raw_text)
+            markup_payload = raw_text
+        elif set_file is not None:
             p = pathlib.Path(set_file)
             if not p.exists():
                 print_error(f"File not found: {set_file}")
                 raise typer.Exit(1)
             markdown_content = p.read_text(encoding="utf-8")
-
-        async def _write() -> str:
             from huly_cli.markup import markdown_to_prosemirror
 
+            markup_payload = markdown_to_prosemirror(markdown_content)
+        else:
+            from huly_cli.markup import markdown_to_prosemirror
+
+            markup_payload = markdown_to_prosemirror(set_text or "")
+
+        async def _write() -> str:
             auth = await ensure_auth(config)
             async with HulyClient(config, auth) as client:
-                markup = markdown_to_prosemirror(markdown_content or "")
+                markup = markup_payload
                 doc = await _find_document_by_id(client, doc_id)
                 if doc.content and not _is_inline_markup(doc.content):
                     ok = await client.set_content(

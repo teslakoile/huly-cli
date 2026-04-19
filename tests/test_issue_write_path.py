@@ -318,6 +318,203 @@ def test_documents_describe_set_creates_blob_ref_when_missing(fake_auth):
     assert tx_mock.await_args.args[0]["operations"] == {"content": "blob-content-2"}
 
 
+def _doc_raw_no_content(**overrides):
+    base = {
+        "_id": "doc-1",
+        "title": "My Doc",
+        "content": None,
+        "space": "space-1",
+        "parent": "document:ids:NoParent",
+        "attachments": 0,
+        "labels": 0,
+        "comments": 0,
+        "rank": "",
+        "createdBy": "",
+        "createdOn": 0,
+        "modifiedBy": "",
+        "modifiedOn": 0,
+    }
+    base.update(overrides)
+    return base
+
+
+# ── documents describe --set-raw / --set-raw-file (#42 Path B) ────────────────
+
+
+RAW_PM_DOC = json.dumps(
+    {
+        "type": "doc",
+        "content": [
+            {
+                "type": "table",
+                "content": [
+                    {
+                        "type": "tableRow",
+                        "content": [
+                            {
+                                "type": "tableHeader",
+                                "attrs": {"colspan": 1, "rowspan": 1},
+                                "content": [
+                                    {
+                                        "type": "paragraph",
+                                        "content": [{"type": "text", "text": "Col"}],
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+)
+
+
+def test_documents_describe_set_raw_writes_verbatim_prosemirror(fake_auth):
+    """--set-raw writes the JSON directly to Collaborator, bypassing markdown parsing."""
+    tx_mock = AsyncMock(return_value={})
+    create_content_mock = AsyncMock(return_value="blob-raw-1")
+
+    with (
+        patch("huly_cli.commands.documents.ensure_auth", new=AsyncMock(return_value=fake_auth)),
+        patch(
+            "huly_cli.client.HulyClient.find_all",
+            new=AsyncMock(return_value=[_doc_raw_no_content()]),
+        ),
+        patch("huly_cli.client.HulyClient.create_content", create_content_mock),
+        patch("huly_cli.client.HulyClient.tx", tx_mock),
+    ):
+        result = runner.invoke(
+            app,
+            ["documents", "describe", "doc-1", "--set-raw", RAW_PM_DOC],
+        )
+
+    assert result.exit_code == 0, result.output
+    create_content_mock.assert_awaited_once()
+    # The markup string handed to create_content must be the exact RAW_PM_DOC,
+    # not a markdown-parsed transform of it. create_content signature:
+    # (class_id, object_id, field, markup_json, *, warn_on_error=...)
+    passed_markup = create_content_mock.await_args.args[3]
+    assert passed_markup == RAW_PM_DOC
+    # Confirm the JSON is the untouched ProseMirror table, not a paragraph-of-text fallback.
+    parsed = json.loads(passed_markup)
+    assert parsed["content"][0]["type"] == "table"
+
+
+def test_documents_describe_set_raw_file_reads_and_writes(fake_auth, tmp_path):
+    """--set-raw-file reads JSON from disk and writes it verbatim to Collaborator."""
+    raw_file = tmp_path / "doc.pm.json"
+    raw_file.write_text(RAW_PM_DOC, encoding="utf-8")
+
+    tx_mock = AsyncMock(return_value={})
+    create_content_mock = AsyncMock(return_value="blob-raw-2")
+
+    with (
+        patch("huly_cli.commands.documents.ensure_auth", new=AsyncMock(return_value=fake_auth)),
+        patch(
+            "huly_cli.client.HulyClient.find_all",
+            new=AsyncMock(return_value=[_doc_raw_no_content()]),
+        ),
+        patch("huly_cli.client.HulyClient.create_content", create_content_mock),
+        patch("huly_cli.client.HulyClient.tx", tx_mock),
+    ):
+        result = runner.invoke(
+            app,
+            ["documents", "describe", "doc-1", "--set-raw-file", str(raw_file)],
+        )
+
+    assert result.exit_code == 0, result.output
+    create_content_mock.assert_awaited_once()
+    assert create_content_mock.await_args.args[3] == RAW_PM_DOC
+
+
+def test_documents_describe_set_raw_file_missing_exits_nonzero():
+    """--set-raw-file exits 1 when the file does not exist; no Collaborator call."""
+    create_content_mock = AsyncMock(return_value="should-not-be-called")
+    with patch("huly_cli.client.HulyClient.create_content", create_content_mock):
+        result = runner.invoke(
+            app,
+            ["documents", "describe", "doc-1", "--set-raw-file", "/nonexistent/raw.json"],
+        )
+    assert result.exit_code == 1, result.output
+    assert "File not found" in result.output
+    create_content_mock.assert_not_awaited()
+
+
+def test_documents_describe_set_raw_invalid_json_rejected():
+    """--set-raw with non-JSON input errors out before any network IO."""
+    create_content_mock = AsyncMock(return_value="should-not-be-called")
+    with patch("huly_cli.client.HulyClient.create_content", create_content_mock):
+        result = runner.invoke(
+            app,
+            ["documents", "describe", "doc-1", "--set-raw", "{not valid json"],
+        )
+    assert result.exit_code == 1, result.output
+    assert "Invalid ProseMirror JSON" in result.output
+    create_content_mock.assert_not_awaited()
+
+
+def test_documents_describe_set_raw_rejects_non_doc_root():
+    """--set-raw with a non-doc root structure errors out with a clear message."""
+    create_content_mock = AsyncMock(return_value="should-not-be-called")
+    bad = json.dumps({"type": "paragraph", "content": []})
+    with patch("huly_cli.client.HulyClient.create_content", create_content_mock):
+        result = runner.invoke(
+            app,
+            ["documents", "describe", "doc-1", "--set-raw", bad],
+        )
+    assert result.exit_code == 1, result.output
+    assert "Invalid ProseMirror document" in result.output
+    create_content_mock.assert_not_awaited()
+
+
+def test_documents_describe_set_raw_rejects_missing_content():
+    """A doc root without a content array is rejected."""
+    create_content_mock = AsyncMock(return_value="should-not-be-called")
+    bad = json.dumps({"type": "doc"})
+    with patch("huly_cli.client.HulyClient.create_content", create_content_mock):
+        result = runner.invoke(
+            app,
+            ["documents", "describe", "doc-1", "--set-raw", bad],
+        )
+    assert result.exit_code == 1, result.output
+    assert "Invalid ProseMirror document" in result.output
+    create_content_mock.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [
+        ["--set", "md", "--set-file", "{file}"],
+        ["--set", "md", "--set-raw", RAW_PM_DOC],
+        ["--set", "md", "--set-raw-file", "{file}"],
+        ["--set-file", "{file}", "--set-raw", RAW_PM_DOC],
+        ["--set-file", "{file}", "--set-raw-file", "{file}"],
+        ["--set-raw", RAW_PM_DOC, "--set-raw-file", "{file}"],
+    ],
+    ids=[
+        "set+set-file",
+        "set+set-raw",
+        "set+set-raw-file",
+        "set-file+set-raw",
+        "set-file+set-raw-file",
+        "set-raw+set-raw-file",
+    ],
+)
+def test_documents_describe_write_flags_mutually_exclusive(tmp_path, flags):
+    """All six pairs among --set, --set-file, --set-raw, --set-raw-file are rejected."""
+    raw_file = tmp_path / "raw.json"
+    raw_file.write_text(RAW_PM_DOC, encoding="utf-8")
+    md_file = tmp_path / "body.md"
+    md_file.write_text("hi", encoding="utf-8")
+    # Reuse the same path for both file placeholders.
+    resolved = [f.replace("{file}", str(raw_file)) for f in flags]
+
+    result = runner.invoke(app, ["documents", "describe", "doc-1", *resolved])
+    assert result.exit_code != 0, result.output
+    assert "Use only one of --set, --set-file, --set-raw, --set-raw-file." in result.output
+
+
 def test_documents_describe_set_errors_when_blob_create_fails(fake_auth):
     """When create_content returns None, documents describe --set shows an error."""
     create_content_mock = AsyncMock(return_value=None)
@@ -748,7 +945,11 @@ def test_issues_describe_rejects_set_and_set_file(tmp_path):
 
 
 def test_documents_describe_rejects_set_and_set_file(tmp_path):
-    """Regression for #21: passing both --set "" and --set-file must error out."""
+    """Regression for #21: passing both --set "" and --set-file must error out.
+
+    Updated for #42: documents describe now supports four mutually-exclusive
+    write flags, so the error wording mentions all of them.
+    """
     tmpfile = tmp_path / "body.md"
     tmpfile.write_text("from file", encoding="utf-8")
 
@@ -758,7 +959,7 @@ def test_documents_describe_rejects_set_and_set_file(tmp_path):
     )
 
     assert result.exit_code != 0, result.output
-    assert "Use either --set or --set-file, not both." in result.output
+    assert "Use only one of --set, --set-file, --set-raw, --set-raw-file." in result.output
 
 
 def test_templates_describe_rejects_set_and_set_file(tmp_path):
