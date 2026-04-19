@@ -146,13 +146,14 @@ Current implemented command groups:
 
 - `auth` — login, status
 - `projects` — list, get
-- `issues` — list, get, create, update, delete, describe
+- `issues` — list, get, create, update, delete, describe, search
 - `documents` — list, get, create, update, delete, describe, search
 - `components` — list, get, create, update, delete
 - `milestones` — list, get, create, update, delete
 - `templates` — list, get, describe (read/write)
 - `labels` — list, get, create, update, delete
 - `members` — list
+- `search` — top-level fulltext search across the whole workspace
 - `upgrade` — self-upgrade from PyPI
 
 Current live-validated CRUD coverage:
@@ -198,6 +199,35 @@ huly documents get --title "Design Doc"
 huly documents describe --title "Design Doc"
 huly documents search "rag template"
 ```
+
+### Fulltext search
+
+```bash
+# Workspace-wide (mixes issues, documents, templates, etc.)
+huly search "milestone 3"
+
+# With a limit and a class filter.
+huly search "roadmap" --limit 10 --class tracker:class:Issue
+
+# Class-scoped wrapper for issues.
+huly issues search "login bug"
+
+# JSON envelope.
+huly --json search "project"
+```
+
+Important caveats for agents:
+
+- Repeatable `--class` filters are applied **client-side** on the returned
+  `doc._class`. The server's `&classes=` query parameter is not reliable,
+  so narrow locally rather than trusting server-side filtering.
+- Omitting `--class` returns a mixed result set ranked by descending
+  `score` — ideal when you don't yet know whether the answer lives in an
+  issue, a document, or a template.
+- The server response is known to arrive with a truncated trailing `}`.
+  The CLI parses the `docs` array directly via a regex workaround, so
+  `huly search` and `huly issues search` always return clean data — do
+  not hit the endpoint with raw `curl` and stock `json.loads`.
 
 ### 5. Use repo facts when relevant
 
