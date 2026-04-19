@@ -16,6 +16,7 @@ from huly_cli.commands import (
     members,
     milestones,
     projects,
+    search,
     templates,
 )
 from huly_cli.commands import upgrade as upgrade_cmd
@@ -38,6 +39,10 @@ app.add_typer(documents.app, name="documents")
 app.add_typer(components.app, name="components")
 app.add_typer(milestones.app, name="milestones")
 app.add_typer(templates.app, name="templates")
+app.command(
+    "search",
+    help="Fulltext search across the workspace (issues, documents, templates, ...).",
+)(search.search)
 app.command("upgrade", help="Upgrade huly-cli to the latest version from PyPI.")(
     upgrade_cmd.upgrade
 )

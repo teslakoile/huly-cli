@@ -839,6 +839,46 @@ def issues_describe(
             console.print(Panel(plain or "(empty description)", title=f"Description: {ident}"))
 
 
+@app.command("search")
+def issues_search(
+    ctx: typer.Context,
+    query: str = typer.Argument(..., help="Search query."),
+    limit: Annotated[
+        int, typer.Option("--limit", "-n", help="Maximum number of hits to return.")
+    ] = 25,
+    json_output: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help="Emit structured JSON output (id, class, title, score).",
+        ),
+    ] = False,
+) -> None:
+    """Fulltext-search issues only.
+
+    Thin wrapper over the top-level ``huly search`` that pre-fills
+    ``--class tracker:class:Issue``. Pairs with the parallel documents-search
+    wrapper owned by #37.
+    """
+    # Import lazily to avoid a circular dependency on main.py.
+    from huly_cli.commands.search import _emit, _run_search
+    from huly_cli.output import set_json_mode
+
+    if json_output:
+        set_json_mode(True)
+
+    try:
+        hits = asyncio.run(_run_search(ctx, query, limit, classes=["tracker:class:Issue"]))
+    except AuthError as e:
+        print_error(e.message, hint="Run 'huly auth login' to authenticate.")
+        raise typer.Exit(2) from e
+    except HulyError as e:
+        print_error(e.message)
+        raise typer.Exit(1) from e
+
+    _emit(hits, title=f"Issues search: {query}")
+
+
 @app.command("delete")
 def issues_delete(
     ctx: typer.Context,

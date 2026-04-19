@@ -26,6 +26,9 @@ Additional capabilities:
   (repeatable `--label` flag on create/update)
 - **Status filtering**: `issues list --status <name>` resolves against the live
   workspace status index, supporting custom statuses
+- **Fulltext search**: `huly search "query"` searches titles and body content
+  across every class in the workspace, with optional `--class` filters and a
+  class-scoped wrapper at `huly issues search`.
 - **JSON mode**: `huly --json <command>` for machine-readable output
 - **Self-upgrade**: `huly upgrade` to update from PyPI
 - **Shell completion**: `huly --install-completion`
@@ -252,6 +255,31 @@ huly templates describe TEMPLATE_ID --set "## Template description"
 ```bash
 huly members list
 ```
+
+### Search
+
+```bash
+# Fulltext search across every class in the workspace.
+huly search "milestone 3"
+
+# Limit results and filter client-side by fully qualified class.
+huly search "roadmap" --limit 10 --class tracker:class:Issue
+huly search "onboarding" --class document:class:Document --class tracker:class:Issue
+
+# Class-scoped wrapper for issues.
+huly issues search "login bug"
+
+# JSON output for scripting.
+huly --json search "project" --limit 5
+huly search "project" --limit 5 --json
+```
+
+Notes:
+
+- The `--class` filter is applied client-side on the returned
+  `doc._class`; the server's equivalent query parameter is not reliable.
+- Results are ranked by descending relevance `score`. Omitting `--class`
+  returns a mixed result set across issues, documents, templates, etc.
 
 ### JSON mode
 
