@@ -147,7 +147,7 @@ Current implemented command groups:
 - `auth` — login, status
 - `projects` — list, get
 - `issues` — list, get, create, update, delete, describe, search
-- `documents` — list, get, create, update, delete, describe, search
+- `documents` — list, get, create, update, delete, describe, tree, search
 - `components` — list, get, create, update, delete
 - `milestones` — list, get, create, update, delete
 - `templates` — list, get, describe (read/write)
@@ -199,6 +199,15 @@ huly documents get --title "Design Doc"
 huly documents describe --title "Design Doc"
 huly documents search "rag template"
 ```
+
+Document hierarchy with `documents tree`:
+
+- `huly documents tree` — every space, grouped by teamspace root
+- `huly documents tree --space "Engineering"` — one teamspace
+- `huly documents tree --root DOC_ID` — subtree under one document
+  (takes precedence over `--space`)
+- `--depth N` — cap recursion (1 = direct children only)
+- `huly --json documents tree` — nested `{id, title, children}` JSON
 
 ### Fulltext search
 
