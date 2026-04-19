@@ -1005,3 +1005,296 @@ def test_templates_describe_rejects_set_and_set_file(tmp_path):
 
     assert result.exit_code != 0, result.output
     assert "Use either --set or --set-file, not both." in result.output
+
+
+# ── documents duplicate (#40) ─────────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _reset_json_mode():
+    """Reset the module-level JSON mode flag between tests.
+
+    CLI tests without ``--json`` otherwise inherit JSON mode from any prior
+    test that set it (module-level state in ``huly_cli.output``).
+    """
+    from huly_cli.output import set_json_mode
+
+    set_json_mode(False)
+    yield
+    set_json_mode(False)
+
+
+def _raw_document(**overrides: object) -> dict[str, object]:
+    doc: dict[str, object] = {
+        "_id": "doc-src",
+        "title": "Weekly Template",
+        "content": "blob-src-1",
+        "space": "ts-src",
+        "parent": "document:ids:NoParent",
+        "attachments": 0,
+        "labels": 0,
+        "comments": 0,
+        "rank": "",
+        "createdBy": "",
+        "createdOn": 0,
+        "modifiedBy": "",
+        "modifiedOn": 0,
+    }
+    doc.update(overrides)
+    return doc
+
+
+_INLINE_MARKUP = (
+    '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"hi"}]}]}'
+)
+
+
+def test_documents_duplicate_inherits_space_and_parent(fake_auth):
+    """duplicate without --space/--parent inherits source's space and parent."""
+    source = _raw_document(content=_INLINE_MARKUP, parent="doc-parent-src")
+    new_empty = _raw_document(
+        _id="doc-new",
+        title="Copy",
+        content="",
+        space="ts-src",
+        parent="doc-parent-src",
+    )
+
+    find_all_mock = AsyncMock(side_effect=[[source], [new_empty]])
+    tx_mock = AsyncMock(return_value={})
+    create_content_mock = AsyncMock(return_value="blob-new-1")
+
+    with (
+        patch("huly_cli.commands.documents.ensure_auth", new=AsyncMock(return_value=fake_auth)),
+        patch("huly_cli.client.HulyClient.find_all", find_all_mock),
+        patch("huly_cli.client.HulyClient.tx", tx_mock),
+        patch("huly_cli.client.HulyClient.create_content", create_content_mock),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "documents",
+                "duplicate",
+                "doc-src",
+                "--title",
+                "Copy",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "Document duplicated" in result.output
+
+    # The create tx should target the source's space + parent.
+    create_tx = tx_mock.await_args_list[0].args[0]
+    assert create_tx["_class"] == "core:class:TxCreateDoc"
+    assert create_tx["objectClass"] == "document:class:Document"
+    assert create_tx["objectSpace"] == "ts-src"
+    assert create_tx["attributes"]["title"] == "Copy"
+    assert create_tx["attributes"]["parent"] == "doc-parent-src"
+
+    # The content-update tx should patch the new doc's content with the blob ref.
+    content_tx = tx_mock.await_args_list[1].args[0]
+    assert content_tx["_class"] == "core:class:TxUpdateDoc"
+    assert content_tx["objectSpace"] == "ts-src"
+    assert content_tx["operations"] == {"content": "blob-new-1"}
+
+    create_content_mock.assert_awaited_once()
+
+
+def test_documents_duplicate_overrides_space(fake_auth):
+    """duplicate --space NAME resolves NAME to a teamspace id for the new doc."""
+    source = _raw_document(content=_INLINE_MARKUP)
+    target_ts = {
+        "_id": "ts-target",
+        "name": "Ops",
+        "description": "",
+        "private": False,
+        "archived": False,
+        "members": [],
+        "owners": [],
+    }
+    new_empty = _raw_document(_id="doc-new", content="", space="ts-target")
+
+    find_all_mock = AsyncMock(
+        side_effect=[
+            [source],  # _find_document_by_id(source)
+            [target_ts],  # _resolve_teamspace_by_name("Ops")
+            [new_empty],  # _find_document_by_id(new) for write
+        ]
+    )
+    tx_mock = AsyncMock(return_value={})
+    create_content_mock = AsyncMock(return_value="blob-new-2")
+
+    with (
+        patch("huly_cli.commands.documents.ensure_auth", new=AsyncMock(return_value=fake_auth)),
+        patch("huly_cli.client.HulyClient.find_all", find_all_mock),
+        patch("huly_cli.client.HulyClient.tx", tx_mock),
+        patch("huly_cli.client.HulyClient.create_content", create_content_mock),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "documents",
+                "duplicate",
+                "doc-src",
+                "--title",
+                "Copy in Ops",
+                "--space",
+                "Ops",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    create_tx = tx_mock.await_args_list[0].args[0]
+    assert create_tx["objectSpace"] == "ts-target"
+    assert create_tx["attributes"]["title"] == "Copy in Ops"
+
+
+def test_documents_duplicate_overrides_parent(fake_auth):
+    """duplicate --parent DOC_ID places the new doc under the given parent."""
+    source = _raw_document(content=_INLINE_MARKUP, parent="doc-parent-src")
+    new_empty = _raw_document(_id="doc-new", content="", parent="doc-parent-override")
+
+    find_all_mock = AsyncMock(side_effect=[[source], [new_empty]])
+    tx_mock = AsyncMock(return_value={})
+    create_content_mock = AsyncMock(return_value="blob-new-3")
+
+    with (
+        patch("huly_cli.commands.documents.ensure_auth", new=AsyncMock(return_value=fake_auth)),
+        patch("huly_cli.client.HulyClient.find_all", find_all_mock),
+        patch("huly_cli.client.HulyClient.tx", tx_mock),
+        patch("huly_cli.client.HulyClient.create_content", create_content_mock),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "documents",
+                "duplicate",
+                "doc-src",
+                "--title",
+                "Copy",
+                "--parent",
+                "doc-parent-override",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    create_tx = tx_mock.await_args_list[0].args[0]
+    assert create_tx["attributes"]["parent"] == "doc-parent-override"
+    # Space still inherited from source.
+    assert create_tx["objectSpace"] == "ts-src"
+
+
+def test_documents_duplicate_json_returns_full_record(fake_auth):
+    """--json returns the full new record including the generated id."""
+    from huly_cli.output import set_json_mode
+
+    source = _raw_document(content=_INLINE_MARKUP)
+    teamspace = {
+        "_id": "ts-src",
+        "name": "Engineering",
+        "description": "",
+        "private": False,
+        "archived": False,
+        "members": [],
+        "owners": [],
+    }
+
+    # side_effect for find_all, in order:
+    #  1. source lookup
+    #  2. new-doc re-fetch (write path)
+    #  3. new-doc re-fetch (JSON detail)
+    #  4. teamspace map (JSON detail)
+    def new_doc_with_blob():
+        return _raw_document(_id="doc-new", content="blob-new-4", title="Copy")
+
+    find_all_mock = AsyncMock(
+        side_effect=[
+            [source],
+            [_raw_document(_id="doc-new", content="", title="Copy")],
+            [new_doc_with_blob()],
+            [teamspace],
+        ]
+    )
+    tx_mock = AsyncMock(return_value={})
+    create_content_mock = AsyncMock(return_value="blob-new-4")
+
+    try:
+        with (
+            patch(
+                "huly_cli.commands.documents.ensure_auth",
+                new=AsyncMock(return_value=fake_auth),
+            ),
+            patch("huly_cli.client.HulyClient.find_all", find_all_mock),
+            patch("huly_cli.client.HulyClient.tx", tx_mock),
+            patch("huly_cli.client.HulyClient.create_content", create_content_mock),
+        ):
+            result = runner.invoke(
+                app,
+                ["--json", "documents", "duplicate", "doc-src", "--title", "Copy"],
+            )
+
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload["ok"] is True
+        assert payload["data"]["id"] == "doc-new"
+        assert payload["data"]["title"] == "Copy"
+        assert payload["data"]["space"] == "Engineering"
+        assert payload["data"]["content_ref"] == "blob-new-4"
+    finally:
+        # Reset module-level JSON mode so subsequent tests see human output.
+        set_json_mode(False)
+
+
+def test_documents_duplicate_source_not_found_gives_clear_error(fake_auth):
+    """Missing source document produces a NotFoundError exit-1 with a clear message."""
+    find_all_mock = AsyncMock(return_value=[])
+
+    with (
+        patch("huly_cli.commands.documents.ensure_auth", new=AsyncMock(return_value=fake_auth)),
+        patch("huly_cli.client.HulyClient.find_all", find_all_mock),
+    ):
+        result = runner.invoke(
+            app,
+            ["documents", "duplicate", "does-not-exist", "--title", "Copy"],
+        )
+
+    assert result.exit_code == 1, result.output
+    assert "does-not-exist" in result.output
+    assert "not found" in result.output.lower()
+
+
+def test_documents_duplicate_missing_title_errors():
+    """--title is required; typer should exit non-zero without attempting any work."""
+    result = runner.invoke(app, ["documents", "duplicate", "doc-src"])
+
+    assert result.exit_code != 0, result.output
+    combined = (result.output + (result.stderr or "")).lower()
+    assert "--title" in combined or "missing option" in combined
+
+
+def test_documents_duplicate_copies_source_content_through_create_content(fake_auth):
+    """The content-copy path uses create_content (new doc starts empty) not set_content."""
+    source = _raw_document(content=_INLINE_MARKUP)
+    new_empty = _raw_document(_id="doc-new", content="")
+
+    find_all_mock = AsyncMock(side_effect=[[source], [new_empty]])
+    tx_mock = AsyncMock(return_value={})
+    create_content_mock = AsyncMock(return_value="blob-new-5")
+    set_content_mock = AsyncMock(return_value=True)
+
+    with (
+        patch("huly_cli.commands.documents.ensure_auth", new=AsyncMock(return_value=fake_auth)),
+        patch("huly_cli.client.HulyClient.find_all", find_all_mock),
+        patch("huly_cli.client.HulyClient.tx", tx_mock),
+        patch("huly_cli.client.HulyClient.create_content", create_content_mock),
+        patch("huly_cli.client.HulyClient.set_content", set_content_mock),
+    ):
+        result = runner.invoke(
+            app,
+            ["documents", "duplicate", "doc-src", "--title", "Copy"],
+        )
+
+    assert result.exit_code == 0, result.output
+    create_content_mock.assert_awaited_once()
+    set_content_mock.assert_not_awaited()

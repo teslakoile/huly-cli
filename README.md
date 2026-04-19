@@ -203,6 +203,7 @@ huly documents describe DOC_ID --set "# Design\n\nContent here."
 huly documents describe DOC_ID --set-file ./doc.md
 
 huly documents update DOC_ID --title "Updated Title"
+huly documents duplicate DOC_ID --title "Weekly Status — 2026-04-19"
 huly documents delete DOC_ID
 
 # Hierarchical view via the parent field
@@ -212,6 +213,10 @@ huly documents tree --root DOC_ID               # subtree under one doc
 huly documents tree --depth 2                   # cap recursion
 huly --json documents tree                      # nested JSON output
 ```
+
+`documents duplicate` copies a source document into a new one in a single
+command — useful for instantiating template-style docs. It inherits the
+source's space and parent by default; pass `--space` or `--parent` to override.
 
 Markdown tables (`| a | b |\n| --- | --- |\n| 1 | 2 |`) round-trip through
 `documents describe --set` / `--set-file` — they are stored as real

@@ -163,7 +163,7 @@ Current implemented command groups:
 - `auth` — login, status
 - `projects` — list, get
 - `issues` — list, get, create, update, delete, describe, search
-- `documents` — list, get, create, update, delete, describe, tree
+- `documents` — list, get, create, update, delete, describe, tree, duplicate
 - `components` — list, get, create, update, delete
 - `milestones` — list, get, create, update, delete
 - `templates` — list, get, describe (read/write)
@@ -194,6 +194,19 @@ Issue-specific fields supported on create/update:
 - `--component` — name or ID (use "" to unset on update)
 - `--label` — repeatable flag to attach labels
 - `--description` — markdown text (create only)
+
+Common agent workflow — clone a weekly template:
+
+```bash
+# User: "make me a copy of the RAG template for this week"
+huly documents duplicate TEMPLATE_DOC_ID \
+  --title "Weekly Project Status Report (RAG) — 2026-04-19"
+# → prints the new document ID; with --json returns the full record
+```
+
+`documents duplicate` inherits the source document's space and parent by
+default and copies its markdown content into the new doc in one call. Pass
+`--space "Name"` or `--parent DOC_ID` to override those defaults.
 
 Document content (`documents describe`):
 
