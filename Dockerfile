@@ -14,4 +14,8 @@ LABEL org.opencontainers.image.licenses="MIT"
 COPY --from=builder /build/dist/*.whl /tmp/
 RUN pip install --no-cache-dir /tmp/*.whl && rm /tmp/*.whl
 
+RUN useradd --create-home --uid 1000 huly
+USER huly
+WORKDIR /home/huly
+
 ENTRYPOINT ["huly"]
