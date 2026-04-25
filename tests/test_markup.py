@@ -387,6 +387,115 @@ class TestMarkdownToProsemirror:
         assert "Hello world" in texts
 
 
+# ── Markdown → ProseMirror autolinks (#49) ───────────────────────────────────
+
+
+def _link_marks(inline_nodes: list[dict]) -> list[dict]:
+    """Pull every `link` mark off a list of inline ProseMirror nodes."""
+    return [m for n in inline_nodes for m in n.get("marks", []) if m.get("type") == "link"]
+
+
+def _link_hrefs(inline_nodes: list[dict]) -> list[str]:
+    return [m.get("attrs", {}).get("href", "") for m in _link_marks(inline_nodes)]
+
+
+class TestMarkdownAutolinks:
+    """Bare ``https://...`` URLs should each become a ProseMirror link mark.
+
+    Regression for #49: previously only the first URL in a pasted body was
+    linked; the rest stayed as plain text.
+    """
+
+    def _inline(self, md: str) -> list[dict]:
+        doc = json.loads(markdown_to_prosemirror(md))
+        paras = [n for n in doc["content"] if n["type"] == "paragraph"]
+        # Flatten inline content from every paragraph into one list.
+        return [c for p in paras for c in p.get("content", [])]
+
+    def test_single_bare_url_becomes_link(self):
+        inline = self._inline("see https://example.com please")
+        hrefs = _link_hrefs(inline)
+        assert hrefs == ["https://example.com"]
+        # Surrounding text is preserved.
+        all_text = "".join(n.get("text", "") for n in inline)
+        assert all_text == "see https://example.com please"
+
+    def test_two_urls_on_same_line_both_linked(self):
+        # Mirrors the bug's exact " | " separator shape.
+        md = "Subject: A | link: https://a.example.com/x | link: https://b.example.com/y"
+        inline = self._inline(md)
+        assert _link_hrefs(inline) == [
+            "https://a.example.com/x",
+            "https://b.example.com/y",
+        ]
+
+    def test_three_urls_across_lines_all_linked(self):
+        md = (
+            "- Subject: A | Gmail link: https://mail.google.com/mail/#all/19d91c48eb9ff376\n"
+            "- Subject: B | Gmail link: https://mail.google.com/mail/#all/19d8f9739e371daf\n"
+            "- Subject: C | Gmail link: https://mail.google.com/mail/#all/19d8c8389dde5065\n"
+        )
+        doc = json.loads(markdown_to_prosemirror(md))
+        # Each line becomes a bullet listItem; flatten all link hrefs from all items.
+        bullet = next(n for n in doc["content"] if n["type"] == "bulletList")
+        all_hrefs: list[str] = []
+        for item in bullet["content"]:
+            for para in item["content"]:
+                if para.get("type") == "paragraph":
+                    all_hrefs.extend(_link_hrefs(para["content"]))
+        assert all_hrefs == [
+            "https://mail.google.com/mail/#all/19d91c48eb9ff376",
+            "https://mail.google.com/mail/#all/19d8f9739e371daf",
+            "https://mail.google.com/mail/#all/19d8c8389dde5065",
+        ]
+
+    def test_trailing_period_not_part_of_href(self):
+        inline = self._inline("Visit https://example.com.")
+        assert _link_hrefs(inline) == ["https://example.com"]
+        all_text = "".join(n.get("text", "") for n in inline)
+        assert all_text.endswith(".")
+
+    def test_trailing_comma_not_part_of_href(self):
+        inline = self._inline("see https://a.example.com, then https://b.example.com")
+        assert _link_hrefs(inline) == [
+            "https://a.example.com",
+            "https://b.example.com",
+        ]
+
+    def test_unbalanced_closing_paren_not_part_of_href(self):
+        # "(see https://example.com)" — the trailing ')' belongs to the prose.
+        inline = self._inline("(see https://example.com)")
+        assert _link_hrefs(inline) == ["https://example.com"]
+        all_text = "".join(n.get("text", "") for n in inline)
+        assert all_text == "(see https://example.com)"
+
+    def test_balanced_parens_kept_in_href(self):
+        # Wikipedia-style URLs with balanced parens are preserved verbatim.
+        inline = self._inline("ref: https://en.wikipedia.org/wiki/Foo_(bar)")
+        assert _link_hrefs(inline) == ["https://en.wikipedia.org/wiki/Foo_(bar)"]
+
+    def test_explicit_markdown_link_still_uses_label(self):
+        # `[click](url)` must NOT be misparsed as a bare URL — the label must win.
+        inline = self._inline("[click](https://example.com)")
+        link_nodes = [n for n in inline if _link_marks([n])]
+        assert len(link_nodes) == 1
+        assert link_nodes[0]["text"] == "click"
+        assert _link_hrefs(inline) == ["https://example.com"]
+
+    def test_http_scheme_also_autolinked(self):
+        inline = self._inline("see http://example.com here")
+        assert _link_hrefs(inline) == ["http://example.com"]
+
+    def test_bare_url_round_trips_back_to_bare_url(self):
+        # Markdown → ProseMirror → Markdown should keep "https://x.com" as-is,
+        # not expand it to "[https://x.com](https://x.com)".
+        md = "see https://example.com here"
+        pm_json = markdown_to_prosemirror(md)
+        back = prosemirror_to_markdown(pm_json)
+        assert "https://example.com" in back
+        assert "[https://example.com]" not in back
+
+
 # ── Markdown → ProseMirror tables (#42) ──────────────────────────────────────
 
 

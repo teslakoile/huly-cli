@@ -204,6 +204,83 @@ async def test_create_impl_skips_description_tx_when_no_description_provided(
     create_description_mock.assert_not_awaited()
 
 
+async def test_create_impl_autolinks_every_url_in_description(fake_config, fake_auth):
+    """Regression for #49: every bare URL in a pasted description must be linked.
+
+    Previously the markdown→ProseMirror conversion only emitted a `link` mark
+    for the first URL on a line (or only the explicit `[text](url)` form),
+    leaving the remaining URLs as plain text. The submitted ProseMirror payload
+    must carry one link mark per URL so the rendered ticket doesn't depend on
+    the UI's autolinker — which only handles the first URL on paste.
+    """
+    project_doc = {
+        "_id": "project-1",
+        "name": "My Project",
+        "identifier": "DEMO",
+        "sequence": 16,
+        "members": [],
+        "owners": [],
+        "description": "",
+        "defaultIssueStatus": "tracker:status:Backlog",
+        "private": False,
+        "archived": False,
+    }
+    find_all_mock = AsyncMock(
+        side_effect=[
+            [project_doc],
+            [{"_id": "issue-16", "rank": "0|i0002f:", "space": "project-1"}],
+        ]
+    )
+    tx_mock = AsyncMock(side_effect=[{"object": {"sequence": 17}}, {}, {}])
+    create_description_mock = AsyncMock(return_value="blob-description-49")
+
+    description = (
+        "- Subject: A | Gmail link: https://mail.google.com/mail/#all/19d91c48eb9ff376\n"
+        "- Subject: B | Gmail link: https://mail.google.com/mail/#all/19d8f9739e371daf\n"
+        "- Subject: C | Gmail link: https://mail.google.com/mail/#all/19d8c8389dde5065"
+    )
+
+    with (
+        patch("huly_cli.commands.issues.ensure_auth", new=AsyncMock(return_value=fake_auth)),
+        patch("huly_cli.client.HulyClient.find_all", find_all_mock),
+        patch("huly_cli.client.HulyClient.tx", tx_mock),
+        patch("huly_cli.client.HulyClient.create_description", create_description_mock),
+    ):
+        await issues_cmd._create_impl(
+            fake_config,
+            title="Multiple URLs",
+            project="DEMO",
+            status=None,
+            priority="medium",
+            assignee=None,
+            description=description,
+        )
+
+    create_description_mock.assert_awaited_once()
+    markup_json = create_description_mock.await_args.args[1]
+    pm_doc = json.loads(markup_json)
+
+    # Walk the document and collect every link href.
+    hrefs: list[str] = []
+
+    def _walk(node: object) -> None:
+        if not isinstance(node, dict):
+            return
+        for mark in node.get("marks", []) or []:
+            if mark.get("type") == "link":
+                hrefs.append(mark.get("attrs", {}).get("href", ""))
+        for child in node.get("content", []) or []:
+            _walk(child)
+
+    _walk(pm_doc)
+
+    assert hrefs == [
+        "https://mail.google.com/mail/#all/19d91c48eb9ff376",
+        "https://mail.google.com/mail/#all/19d8f9739e371daf",
+        "https://mail.google.com/mail/#all/19d8c8389dde5065",
+    ], f"expected one link mark per URL, got {hrefs!r}"
+
+
 async def test_update_impl_resolves_custom_status_and_unassigns(fake_config, fake_auth):
     issue = Issue.model_validate(_raw_issue(space="project-1"))
     tx_mock = AsyncMock(return_value={})

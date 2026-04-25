@@ -166,7 +166,8 @@ def _inline_to_md(nodes: list[Any]) -> str:
             continue
         node_type = node.get("type", "")
         if node_type == "text":
-            text = node.get("text", "")
+            original = node.get("text", "")
+            text = original
             marks = node.get("marks", [])
             mark_types = {m.get("type") for m in marks}
             if "code" in mark_types:
@@ -182,7 +183,10 @@ def _inline_to_md(nodes: list[Any]) -> str:
             for m in marks:
                 if m.get("type") == "link":
                     href = m.get("attrs", {}).get("href", "")
-                    text = f"[{text}]({href})"
+                    if mark_types == {"link"} and original == href:
+                        text = href
+                    else:
+                        text = f"[{text}]({href})"
             result += text
         elif node_type == "hardBreak":
             result += "\n"
@@ -443,15 +447,18 @@ def _cell_node(cell_type: str, text: str) -> dict:
 
 def _parse_inline(text: str) -> list[dict]:
     """Parse inline markdown (bold, italic, code, links) into ProseMirror inline nodes."""
-    # Pattern order matters: code > bold+italic > bold > italic > link
+    # Pattern order matters: code > bold+italic > bold > italic > link > autolink.
+    # The bare-URL autolink (group 10) intentionally comes after the explicit
+    # ``[text](url)`` link form so a markdown link is preferred when both could match.
     pattern = re.compile(
-        r"(`[^`]+`)"  # inline code
-        r"|(\*\*\*[^*]+\*\*\*)"  # bold+italic ***
-        r"|(\*\*[^*]+\*\*)"  # bold **
-        r"|(\*[^*]+\*)"  # italic *
-        r"|(_[^_]+_)"  # italic _
-        r"|(~~[^~]+~~)"  # strikethrough
-        r"|(\[([^\]]+)\]\(([^)]+)\))"  # link [text](url)
+        r"(`[^`]+`)"  # 1: inline code
+        r"|(\*\*\*[^*]+\*\*\*)"  # 2: bold+italic ***
+        r"|(\*\*[^*]+\*\*)"  # 3: bold **
+        r"|(\*[^*]+\*)"  # 4: italic *
+        r"|(_[^_]+_)"  # 5: italic _
+        r"|(~~[^~]+~~)"  # 6: strikethrough
+        r"|(\[([^\]]+)\]\(([^)]+)\))"  # 7,8,9: link [text](url)
+        r"|(https?://[^\s<>\[\]`]+)"  # 10: bare URL autolink
     )
 
     runs: list[dict] = []
@@ -490,9 +497,46 @@ def _parse_inline(text: str) -> list[dict]:
                     "marks": [{"type": "link", "attrs": {"href": href, "target": "_blank"}}],
                 }
             )
+        elif m.group(10):  # bare URL autolink
+            url, trailing = _split_url_trailing_punct(m.group(10))
+            runs.append(
+                {
+                    "type": "text",
+                    "text": url,
+                    "marks": [{"type": "link", "attrs": {"href": url, "target": "_blank"}}],
+                }
+            )
+            if trailing:
+                runs.append({"type": "text", "text": trailing})
 
     # Trailing plain text
     if last < len(text):
         runs.append({"type": "text", "text": text[last:]})
 
     return runs if runs else [{"type": "text", "text": text}]
+
+
+def _split_url_trailing_punct(url: str) -> tuple[str, str]:
+    """Split sentence-level punctuation off the tail of an autolinked URL.
+
+    Greedy URL matching pulls in trailing characters that almost certainly
+    belong to the surrounding prose, not the URL itself: a period at the end
+    of a sentence, a comma in a list, an unbalanced closing bracket from
+    ``(see https://x.com)``. Strip those, but leave balanced brackets intact
+    so URLs like ``https://en.wikipedia.org/wiki/Foo_(bar)`` survive.
+    """
+    trailing = ""
+    while url:
+        last = url[-1]
+        if last in ".,;:!?":
+            trailing = last + trailing
+            url = url[:-1]
+        elif last == ")" and url.count("(") < url.count(")"):
+            trailing = last + trailing
+            url = url[:-1]
+        elif last == "]" and url.count("[") < url.count("]"):
+            trailing = last + trailing
+            url = url[:-1]
+        else:
+            break
+    return url, trailing
