@@ -131,10 +131,8 @@ def auth_login_otp(
         else:
             raise AuthError("OTP code required. Pass --code.")
 
-    config.otp_code = code
-
     try:
-        auth = asyncio.run(login_otp(config))
+        auth = asyncio.run(login_otp(config, code))
     except AuthError as e:
         print_error(e.message)
         raise typer.Exit(2) from e

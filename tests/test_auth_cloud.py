@@ -229,8 +229,6 @@ async def test_send_otp_self_hosted_uses_positional_params(fake_config):
 
 
 async def test_login_otp_validates_and_completes(cloud_config):
-    cloud_config.otp_code = "123456"
-
     def handler(request):
         import json as _json
         parsed = _json.loads(request.content)
@@ -267,16 +265,15 @@ async def test_login_otp_validates_and_completes(cloud_config):
 
         import unittest.mock as mock
         with mock.patch("huly_cli.auth.save_auth"):
-            auth = await auth_module.login_otp(cloud_config)
+            auth = await auth_module.login_otp(cloud_config, "123456")
 
     assert auth.account_token == "acct"
     assert auth.workspace_token == "ws"
 
 
 async def test_login_otp_requires_code(cloud_config):
-    cloud_config.otp_code = None
     with pytest.raises(AuthError):
-        await auth_module.login_otp(cloud_config)
+        await auth_module.login_otp(cloud_config, "")
 
 
 # ── result hardening ─────────────────────────────────────────────────────────
