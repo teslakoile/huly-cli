@@ -296,6 +296,45 @@ async def test_select_workspace_missing_token_raises_auth_error(cloud_config):
     assert "token" in str(exc.value).lower()
 
 
+async def test_self_hosted_ignores_select_workspace_endpoint(fake_config):
+    """Self-hosted login must keep its /_transactor base even if the response carries an endpoint."""
+    def handler(request):
+        import json as _json
+        method = _json.loads(request.content)["method"]
+        if method == "login":
+            return httpx.Response(200, json={"result": {"token": "acct-tok"}})
+        if method == "selectWorkspace":
+            # Hypothetical future server-side change that populates endpoint.
+            return httpx.Response(200, json={
+                "result": {
+                    "token": "ws-tok",
+                    "workspaceId": "w-1",
+                    "endpoint": "wss://internal-transactor.example.com",
+                }
+            })
+        if method == "getUserWorkspaces":
+            return httpx.Response(200, json={
+                "result": [{"workspaceUrl": "test-ws", "uuid": "uuid-1"}]
+            })
+        return httpx.Response(500)
+
+    with respx.mock:
+        respx.post(SELF_HOSTED_ACCOUNTS_URL).mock(side_effect=handler)
+        # Asserts the override was NOT applied: requests still go via /_transactor.
+        respx.get(
+            "https://test.example.com/_transactor/api/v1/account/w-1"
+        ).respond(json={"_id": "acc-1"})
+        respx.get(
+            "https://test.example.com/_transactor/api/v1/ping/w-1"
+        ).respond(200)
+
+        import unittest.mock as mock
+        with mock.patch("huly_cli.auth.save_auth"):
+            auth = await auth_module.login(fake_config)
+
+    assert auth.transactor_base == "https://test.example.com/_transactor"
+
+
 async def test_cloud_getuserworkspaces_missing_workspace_raises(cloud_config):
     def handler(request):
         import json as _json
