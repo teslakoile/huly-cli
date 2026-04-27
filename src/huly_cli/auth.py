@@ -119,17 +119,17 @@ async def login(config: HulyConfig) -> AuthCache:
         )
 
 
-async def login_otp(config: HulyConfig) -> AuthCache:
+async def login_otp(config: HulyConfig, code: str) -> AuthCache:
     """Perform OTP (email code) auth flow and cache tokens.
 
-    The caller is responsible for sending the OTP first (via ``send_otp``)
-    and collecting the code into ``config.otp_code``.
+    Caller is responsible for sending the OTP first via ``send_otp`` and
+    collecting the code (e.g. from a prompt or ``--code`` flag).
     """
     if not config.email:
         raise AuthError("Email is required for OTP login. Set HULY_EMAIL env var.")
     if not config.workspace:
         raise AuthError("Workspace is required for login. Set HULY_WORKSPACE env var.")
-    if not config.otp_code:
+    if not code:
         raise AuthError("OTP code required. Check your email and pass --code.")
 
     accounts_url = _accounts_url(config)
@@ -138,8 +138,8 @@ async def login_otp(config: HulyConfig) -> AuthCache:
     async with httpx.AsyncClient(timeout=30.0) as http:
         otp_params = _params(
             config,
-            cloud={"email": config.email, "code": config.otp_code},
-            self_hosted=[config.email, config.otp_code],
+            cloud={"email": config.email, "code": code},
+            self_hosted=[config.email, code],
         )
         body = await _rpc(http, accounts_url, "validateOtp", otp_params)
         result = _require_result_dict(body, "OTP login")

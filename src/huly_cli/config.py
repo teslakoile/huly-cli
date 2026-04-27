@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +25,6 @@ class HulyConfig:
     workspace: str
     email: str | None = None
     password: str | None = None
-    otp_code: str | None = field(default=None, repr=False)
 
 
 @dataclass
