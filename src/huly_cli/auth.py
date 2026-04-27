@@ -12,8 +12,10 @@ from huly_cli.errors import AuthError
 
 
 def _is_cloud(config: HulyConfig) -> bool:
-    """Return True if the configured URL points at Huly cloud (huly.app)."""
+    """Return True if the configured URL points at Huly cloud (*.huly.app)."""
     parsed = urlparse(config.url)
+    # Match only subdomains of huly.app (e.g. app.huly.app); a bare huly.app
+    # host is not the cloud entry point and stays on the self-hosted code path.
     return bool(parsed.hostname and parsed.hostname.endswith(".huly.app"))
 
 
@@ -87,12 +89,9 @@ def _require_str(result: dict, key: str, method: str) -> str:
 async def login(config: HulyConfig) -> AuthCache:
     """Perform full password auth flow and cache tokens.
 
-    Steps:
-    1. POST accounts → login → account_token
-    2. POST accounts with account_token → selectWorkspace → workspace_token
-    3. POST accounts with account_token → getUserWorkspaces → workspace_uuid
-    4. GET transactor/api/v1/account/{workspace_id} → account_id
-    5. Verify with ping
+    Exchanges email+password for an account token, then delegates the
+    workspace selection / account-id resolution / ping verification to
+    ``_complete_login``.
     """
     if not config.email:
         raise AuthError("Email is required for login. Set HULY_EMAIL env var.")
