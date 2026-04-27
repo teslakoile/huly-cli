@@ -192,10 +192,13 @@ async def _complete_login(
         )
 
     # Cloud returns a per-region transactor endpoint (e.g. wss://europe-tr1.huly.app).
-    # Use it for REST calls instead of the default /_transactor path.
-    endpoint = ws_result.get("endpoint", "")
-    if endpoint:
-        transactor_base = endpoint.replace("wss://", "https://").replace("ws://", "http://")
+    # Use it for REST calls instead of the default /_transactor path. Self-hosted
+    # instances reach the transactor through the nginx /_transactor reverse-proxy,
+    # so leave the base URL alone even if the response carries an `endpoint` field.
+    if _is_cloud(config):
+        endpoint = ws_result.get("endpoint", "")
+        if endpoint:
+            transactor_base = endpoint.replace("wss://", "https://").replace("ws://", "http://")
 
     ws_list_params = _params(config, cloud={}, self_hosted=[])
     body = await _rpc(
