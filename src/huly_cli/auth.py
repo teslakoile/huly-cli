@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from urllib.parse import urlparse
 
 import httpx
 
@@ -10,15 +11,87 @@ from huly_cli.config import AuthCache, HulyConfig, load_auth, save_auth
 from huly_cli.errors import AuthError
 
 
-async def login(config: HulyConfig) -> AuthCache:
-    """Perform full auth flow and cache tokens.
+def _is_cloud(config: HulyConfig) -> bool:
+    """Return True if the configured URL points at Huly cloud (*.huly.app)."""
+    parsed = urlparse(config.url)
+    # Match only subdomains of huly.app (e.g. app.huly.app); a bare huly.app
+    # host is not the cloud entry point and stays on the self-hosted code path.
+    return bool(parsed.hostname and parsed.hostname.endswith(".huly.app"))
 
-    Steps:
-    1. POST /_accounts → login → account_token
-    2. POST /_accounts with account_token → selectWorkspace → workspace_token + workspace_id
-    3. POST /_accounts with account_token → getUserWorkspaces → workspace_uuid
-    4. GET /_transactor/api/v1/account/{workspace_id} → account_id
-    5. Verify with ping
+
+def _accounts_url(config: HulyConfig) -> str:
+    """Return the accounts RPC endpoint for the given Huly instance.
+
+    Huly cloud (huly.app) uses a dedicated ``account`` subdomain.
+    Self-hosted instances expose the account service at ``/_accounts``
+    via an nginx reverse-proxy.
+    """
+    if _is_cloud(config):
+        parsed = urlparse(config.url)
+        return f"{parsed.scheme or 'https'}://account.huly.app"
+    return f"{config.url}/_accounts"
+
+
+def _params(config: HulyConfig, *, cloud: dict, self_hosted: list) -> dict | list:
+    """Return request params in the format expected by the target instance.
+
+    Cloud accepts named params (dict); self-hosted expects positional params (list).
+    """
+    return cloud if _is_cloud(config) else self_hosted
+
+
+async def _rpc(
+    http: httpx.AsyncClient,
+    url: str,
+    method: str,
+    params: dict | list,
+    *,
+    token: str | None = None,
+    request_id: str = "1",
+) -> dict:
+    """Send a JSON-RPC request to the Huly accounts service."""
+    headers = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    resp = await http.post(
+        url,
+        headers=headers,
+        json={"id": request_id, "method": method, "params": params},
+    )
+    resp.raise_for_status()
+    body = resp.json()
+    if "error" in body and body["error"] is not None:
+        raise AuthError(f"{method} failed: {body['error']}")
+    return body
+
+
+def _require_result_dict(body: dict, method: str) -> dict:
+    result = body.get("result")
+    if not isinstance(result, dict):
+        raise AuthError(
+            f"{method} failed: unexpected response from accounts API "
+            "(missing or invalid 'result' field). The server may be "
+            "incompatible or a proxy may be intercepting the request."
+        )
+    return result
+
+
+def _require_str(result: dict, key: str, method: str) -> str:
+    value = result.get(key)
+    if not value or not isinstance(value, str):
+        raise AuthError(
+            f"{method} failed: response did not include a '{key}' "
+            "in the 'result' payload."
+        )
+    return value
+
+
+async def login(config: HulyConfig) -> AuthCache:
+    """Perform full password auth flow and cache tokens.
+
+    Exchanges email+password for an account token, then delegates the
+    workspace selection / account-id resolution / ping verification to
+    ``_complete_login``.
     """
     if not config.email:
         raise AuthError("Email is required for login. Set HULY_EMAIL env var.")
@@ -27,114 +100,151 @@ async def login(config: HulyConfig) -> AuthCache:
     if not config.workspace:
         raise AuthError("Workspace is required for login. Set HULY_WORKSPACE env var.")
 
-    accounts_url = f"{config.url}/_accounts"
+    accounts_url = _accounts_url(config)
     transactor_base = f"{config.url}/_transactor"
 
     async with httpx.AsyncClient(timeout=30.0) as http:
-        # Step 1: Login
-        resp = await http.post(
-            accounts_url,
-            json={"id": "1", "method": "login", "params": [config.email, config.password]},
+        login_params = _params(
+            config,
+            cloud={"email": config.email, "password": config.password},
+            self_hosted=[config.email, config.password],
         )
-        resp.raise_for_status()
-        body = resp.json()
-        if "error" in body and body["error"] is not None:
-            raise AuthError(f"Login failed: {body['error']}")
-        if "result" not in body or not isinstance(body.get("result"), dict):
-            raise AuthError(
-                "Login failed: unexpected response from accounts API "
-                "(missing 'result' field). The server may be incompatible "
-                "or a proxy may be intercepting the request."
-            )
-        account_token_value = body["result"].get("token")
-        if not account_token_value or not isinstance(account_token_value, str):
-            raise AuthError(
-                "Login failed: accounts API response did not include a 'token' "
-                "in the 'result' payload."
-            )
-        account_token: str = account_token_value
+        body = await _rpc(http, accounts_url, "login", login_params)
+        result = _require_result_dict(body, "Login")
+        account_token = _require_str(result, "token", "Login")
 
-        # Step 2: Select workspace
-        resp = await http.post(
-            accounts_url,
-            headers={"Authorization": f"Bearer {account_token}"},
-            json={
-                "id": "2",
-                "method": "selectWorkspace",
-                "params": [config.workspace, "external"],
-            },
+        return await _complete_login(
+            http, config, accounts_url, transactor_base, account_token,
         )
-        resp.raise_for_status()
-        body = resp.json()
-        if "error" in body and body["error"] is not None:
-            raise AuthError(f"Select workspace failed: {body['error']}")
-        if "result" not in body or not isinstance(body.get("result"), dict):
-            raise AuthError(
-                "Select workspace failed: unexpected response from accounts API "
-                "(missing 'result' field)."
-            )
-        ws_result = body["result"]
-        workspace_token_value = ws_result.get("token")
-        workspace_id_value = ws_result.get("workspaceId")
-        if not workspace_token_value or not isinstance(workspace_token_value, str):
-            raise AuthError(
-                "Select workspace failed: response did not include a 'token' "
-                "in the 'result' payload."
-            )
-        if not workspace_id_value or not isinstance(workspace_id_value, str):
-            raise AuthError(
-                "Select workspace failed: response did not include a 'workspaceId' "
-                "in the 'result' payload."
-            )
-        workspace_token: str = workspace_token_value
-        workspace_id: str = workspace_id_value
 
-        # Step 3: Get workspace UUID via getUserWorkspaces
-        resp = await http.post(
-            accounts_url,
-            headers={"Authorization": f"Bearer {account_token}"},
-            json={"id": "3", "method": "getUserWorkspaces", "params": []},
-        )
-        resp.raise_for_status()
-        body = resp.json()
-        if "error" in body and body["error"] is not None:
-            raise AuthError(f"getUserWorkspaces failed: {body['error']}")
-        workspace_uuid = ""
-        for ws in body.get("result", []) or []:
-            if ws.get("workspaceUrl") == config.workspace:
-                workspace_uuid = ws.get("uuid", "")
-                break
-        if not workspace_uuid:
-            raise AuthError(
-                f"Could not find UUID for workspace '{config.workspace}' in getUserWorkspaces response."
-            )
 
-        # Step 4: Get account ID
-        resp = await http.get(
-            f"{transactor_base}/api/v1/account/{workspace_id}",
-            headers={"Authorization": f"Bearer {workspace_token}"},
-        )
-        resp.raise_for_status()
-        account_data = resp.json()
-        # account endpoint returns the account object; _id is the account ID
-        account_id: str = account_data.get("_id", account_data.get("id", ""))
+async def login_otp(config: HulyConfig, code: str) -> AuthCache:
+    """Perform OTP (email code) auth flow and cache tokens.
 
-        # Step 5: Ping to verify
-        ping_resp = await http.get(
-            f"{transactor_base}/api/v1/ping/{workspace_id}",
-            headers={"Authorization": f"Bearer {workspace_token}"},
+    Caller is responsible for sending the OTP first via ``send_otp`` and
+    collecting the code (e.g. from a prompt or ``--code`` flag).
+    """
+    if not config.email:
+        raise AuthError("Email is required for OTP login. Set HULY_EMAIL env var.")
+    if not config.workspace:
+        raise AuthError("Workspace is required for login. Set HULY_WORKSPACE env var.")
+    if not code:
+        raise AuthError("OTP code required. Check your email and pass --code.")
+
+    accounts_url = _accounts_url(config)
+    transactor_base = f"{config.url}/_transactor"
+
+    async with httpx.AsyncClient(timeout=30.0) as http:
+        otp_params = _params(
+            config,
+            cloud={"email": config.email, "code": code},
+            self_hosted=[config.email, code],
         )
-        ping_resp.raise_for_status()
+        body = await _rpc(http, accounts_url, "validateOtp", otp_params)
+        result = _require_result_dict(body, "OTP login")
+        account_token = _require_str(result, "token", "OTP login")
+
+        return await _complete_login(
+            http, config, accounts_url, transactor_base, account_token,
+        )
+
+
+async def send_otp(config: HulyConfig) -> None:
+    """Request an OTP code to be sent to the user's email."""
+    if not config.email:
+        raise AuthError("Email is required. Set HULY_EMAIL env var.")
+
+    accounts_url = _accounts_url(config)
+    async with httpx.AsyncClient(timeout=30.0) as http:
+        params = _params(
+            config,
+            cloud={"email": config.email},
+            self_hosted=[config.email],
+        )
+        await _rpc(http, accounts_url, "loginOtp", params)
+
+
+async def _complete_login(
+    http: httpx.AsyncClient,
+    config: HulyConfig,
+    accounts_url: str,
+    transactor_base: str,
+    account_token: str,
+) -> AuthCache:
+    """Complete login after obtaining an account token (from password or OTP)."""
+    select_params = _params(
+        config,
+        cloud={"workspaceUrl": config.workspace, "kind": "external"},
+        self_hosted=[config.workspace, "external"],
+    )
+    body = await _rpc(
+        http, accounts_url, "selectWorkspace", select_params,
+        token=account_token, request_id="2",
+    )
+    ws_result = _require_result_dict(body, "Select workspace")
+    workspace_token = _require_str(ws_result, "token", "Select workspace")
+    workspace_id = ws_result.get("workspaceId") or ws_result.get("workspace", "")
+    if not isinstance(workspace_id, str) or not workspace_id:
+        raise AuthError(
+            "Select workspace failed: response did not include a 'workspaceId' "
+            "in the 'result' payload."
+        )
+
+    # Cloud returns a per-region transactor endpoint (e.g. wss://europe-tr1.huly.app).
+    # Use it for REST calls instead of the default /_transactor path. Self-hosted
+    # instances reach the transactor through the nginx /_transactor reverse-proxy,
+    # so leave the base URL alone even if the response carries an `endpoint` field.
+    if _is_cloud(config):
+        endpoint = ws_result.get("endpoint", "")
+        if endpoint:
+            transactor_base = endpoint.replace("wss://", "https://").replace("ws://", "http://")
+
+    ws_list_params = _params(config, cloud={}, self_hosted=[])
+    body = await _rpc(
+        http, accounts_url, "getUserWorkspaces", ws_list_params,
+        token=account_token, request_id="3",
+    )
+    workspaces = body.get("result") or []
+    if not isinstance(workspaces, list):
+        raise AuthError(
+            "getUserWorkspaces failed: unexpected response shape (expected list)."
+        )
+    workspace_uuid = ""
+    for ws in workspaces:
+        if not isinstance(ws, dict):
+            continue
+        if ws.get("workspaceUrl") == config.workspace or ws.get("url") == config.workspace:
+            workspace_uuid = ws.get("uuid", "")
+            break
+    if not workspace_uuid:
+        raise AuthError(
+            f"Could not find UUID for workspace '{config.workspace}' in getUserWorkspaces response."
+        )
+
+    resp = await http.get(
+        f"{transactor_base}/api/v1/account/{workspace_id}",
+        headers={"Authorization": f"Bearer {workspace_token}"},
+    )
+    resp.raise_for_status()
+    account_data = resp.json()
+    account_id: str = account_data.get("_id", account_data.get("id", ""))
+
+    ping_resp = await http.get(
+        f"{transactor_base}/api/v1/ping/{workspace_id}",
+        headers={"Authorization": f"Bearer {workspace_token}"},
+    )
+    ping_resp.raise_for_status()
 
     auth = AuthCache(
         account_token=account_token,
         workspace_token=workspace_token,
         workspace_id=workspace_id,
         workspace_uuid=workspace_uuid,
-        email=config.email,
+        email=config.email or "",
         workspace_slug=config.workspace,
         account_id=account_id,
         cached_at=time.time(),
+        transactor_base=transactor_base,
     )
     save_auth(auth)
     return auth
@@ -142,7 +252,7 @@ async def login(config: HulyConfig) -> AuthCache:
 
 async def _ping(config: HulyConfig, auth: AuthCache) -> bool:
     """Ping the transactor to verify the cached token is still valid."""
-    transactor_base = f"{config.url}/_transactor"
+    transactor_base = auth.transactor_base or f"{config.url}/_transactor"
     try:
         async with httpx.AsyncClient(timeout=10.0) as http:
             resp = await http.get(
@@ -160,7 +270,6 @@ async def ensure_auth(config: HulyConfig) -> AuthCache:
     if cached is not None:
         if await _ping(config, cached):
             return cached
-        # Token stale — re-login if we have credentials
         if not config.email or not config.password:
             raise AuthError(
                 "Cached token is invalid and no credentials available to re-authenticate. "
