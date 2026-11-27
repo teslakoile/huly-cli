@@ -151,6 +151,16 @@ huly auth login
 huly auth status
 ```
 
+### Huly cloud
+
+For Huly cloud, use `https://app.huly.app` as the URL. Password login works the same way, and `auth login-otp` logs in with a code sent to your email:
+
+```bash
+huly --url https://app.huly.app --workspace my-ws auth login-otp
+```
+
+Pass `--code` to skip the prompt. A cached OTP login can't renew itself, so run `auth login-otp` again when `auth status` says the token expired.
+
 ## Usage Examples
 
 ### Projects
