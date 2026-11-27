@@ -12,9 +12,9 @@ Covers:
 
 from __future__ import annotations
 
+import httpx
 import pytest
 import respx
-import httpx
 
 from huly_cli import auth as auth_module
 from huly_cli.config import HulyConfig
@@ -72,26 +72,18 @@ def test_params_helper_shape(cloud_config, fake_config):
 async def test_rpc_null_error_does_not_raise():
     """{"error": null} is valid — _rpc must not raise on it."""
     with respx.mock:
-        respx.post(SELF_HOSTED_ACCOUNTS_URL).respond(
-            json={"error": None, "result": {"ok": True}}
-        )
+        respx.post(SELF_HOSTED_ACCOUNTS_URL).respond(json={"error": None, "result": {"ok": True}})
         async with httpx.AsyncClient() as http:
-            body = await auth_module._rpc(
-                http, SELF_HOSTED_ACCOUNTS_URL, "login", {}
-            )
+            body = await auth_module._rpc(http, SELF_HOSTED_ACCOUNTS_URL, "login", {})
         assert body["result"] == {"ok": True}
 
 
 async def test_rpc_non_null_error_raises():
     with respx.mock:
-        respx.post(SELF_HOSTED_ACCOUNTS_URL).respond(
-            json={"error": "bad creds"}
-        )
+        respx.post(SELF_HOSTED_ACCOUNTS_URL).respond(json={"error": "bad creds"})
         async with httpx.AsyncClient() as http:
             with pytest.raises(AuthError) as exc:
-                await auth_module._rpc(
-                    http, SELF_HOSTED_ACCOUNTS_URL, "login", {}
-                )
+                await auth_module._rpc(http, SELF_HOSTED_ACCOUNTS_URL, "login", {})
         assert "bad creds" in str(exc.value)
 
 
@@ -105,32 +97,30 @@ async def test_self_hosted_login_sends_positional_params(fake_config):
     def handler(request):
         body = request.content
         import json as _json
+
         parsed = _json.loads(body)
         captured.setdefault("login_params", []).append(parsed["params"])
         method = parsed["method"]
         if method == "login":
             return httpx.Response(200, json={"result": {"token": "acct-tok"}})
         if method == "selectWorkspace":
-            return httpx.Response(200, json={
-                "result": {"token": "ws-tok", "workspaceId": "w-1"}
-            })
+            return httpx.Response(200, json={"result": {"token": "ws-tok", "workspaceId": "w-1"}})
         if method == "getUserWorkspaces":
-            return httpx.Response(200, json={
-                "result": [{"workspaceUrl": "test-ws", "uuid": "uuid-1"}]
-            })
+            return httpx.Response(
+                200, json={"result": [{"workspaceUrl": "test-ws", "uuid": "uuid-1"}]}
+            )
         return httpx.Response(500)
 
     with respx.mock:
         respx.post(SELF_HOSTED_ACCOUNTS_URL).mock(side_effect=handler)
-        respx.get(
-            "https://test.example.com/_transactor/api/v1/account/w-1"
-        ).respond(json={"_id": "acc-1"})
-        respx.get(
-            "https://test.example.com/_transactor/api/v1/ping/w-1"
-        ).respond(200)
+        respx.get("https://test.example.com/_transactor/api/v1/account/w-1").respond(
+            json={"_id": "acc-1"}
+        )
+        respx.get("https://test.example.com/_transactor/api/v1/ping/w-1").respond(200)
 
         # save_auth writes to disk; patch it out.
         import unittest.mock as mock
+
         with mock.patch("huly_cli.auth.save_auth"):
             await auth_module.login(fake_config)
 
@@ -153,35 +143,36 @@ async def test_cloud_login_sends_named_params(cloud_config):
 
     def handler(request):
         import json as _json
+
         parsed = _json.loads(request.content)
         captured.append((parsed["method"], parsed["params"]))
         method = parsed["method"]
         if method == "login":
             return httpx.Response(200, json={"result": {"token": "acct"}})
         if method == "selectWorkspace":
-            return httpx.Response(200, json={
-                "result": {
-                    "token": "ws",
-                    "workspaceId": "w-1",
-                    "endpoint": "wss://europe-tr1.huly.app",
-                }
-            })
+            return httpx.Response(
+                200,
+                json={
+                    "result": {
+                        "token": "ws",
+                        "workspaceId": "w-1",
+                        "endpoint": "wss://europe-tr1.huly.app",
+                    }
+                },
+            )
         if method == "getUserWorkspaces":
-            return httpx.Response(200, json={
-                "result": [{"workspaceUrl": "acme", "uuid": "uuid-1"}]
-            })
+            return httpx.Response(
+                200, json={"result": [{"workspaceUrl": "acme", "uuid": "uuid-1"}]}
+            )
         return httpx.Response(500)
 
     with respx.mock:
         respx.post(CLOUD_ACCOUNTS_URL).mock(side_effect=handler)
-        respx.get(
-            "https://europe-tr1.huly.app/api/v1/account/w-1"
-        ).respond(json={"_id": "acc-1"})
-        respx.get(
-            "https://europe-tr1.huly.app/api/v1/ping/w-1"
-        ).respond(200)
+        respx.get("https://europe-tr1.huly.app/api/v1/account/w-1").respond(json={"_id": "acc-1"})
+        respx.get("https://europe-tr1.huly.app/api/v1/ping/w-1").respond(200)
 
         import unittest.mock as mock
+
         with mock.patch("huly_cli.auth.save_auth") as save:
             auth = await auth_module.login(cloud_config)
 
@@ -203,6 +194,7 @@ async def test_send_otp_cloud_uses_named_params(cloud_config):
 
     def handler(request):
         import json as _json
+
         captured.append(_json.loads(request.content)["params"])
         return httpx.Response(200, json={"result": None})
 
@@ -218,6 +210,7 @@ async def test_send_otp_self_hosted_uses_positional_params(fake_config):
 
     def handler(request):
         import json as _json
+
         captured.append(_json.loads(request.content)["params"])
         return httpx.Response(200, json={"result": None})
 
@@ -231,6 +224,7 @@ async def test_send_otp_self_hosted_uses_positional_params(fake_config):
 async def test_login_otp_validates_and_completes(cloud_config):
     def handler(request):
         import json as _json
+
         parsed = _json.loads(request.content)
         method = parsed["method"]
         if method == "validateOtp":
@@ -241,29 +235,29 @@ async def test_login_otp_validates_and_completes(cloud_config):
             }
             return httpx.Response(200, json={"result": {"token": "acct"}})
         if method == "selectWorkspace":
-            return httpx.Response(200, json={
-                "result": {
-                    "token": "ws",
-                    "workspaceId": "w-1",
-                    "endpoint": "wss://europe-tr1.huly.app",
-                }
-            })
+            return httpx.Response(
+                200,
+                json={
+                    "result": {
+                        "token": "ws",
+                        "workspaceId": "w-1",
+                        "endpoint": "wss://europe-tr1.huly.app",
+                    }
+                },
+            )
         if method == "getUserWorkspaces":
-            return httpx.Response(200, json={
-                "result": [{"workspaceUrl": "acme", "uuid": "uuid-1"}]
-            })
+            return httpx.Response(
+                200, json={"result": [{"workspaceUrl": "acme", "uuid": "uuid-1"}]}
+            )
         return httpx.Response(500)
 
     with respx.mock:
         respx.post(CLOUD_ACCOUNTS_URL).mock(side_effect=handler)
-        respx.get(
-            "https://europe-tr1.huly.app/api/v1/account/w-1"
-        ).respond(json={"_id": "acc-1"})
-        respx.get(
-            "https://europe-tr1.huly.app/api/v1/ping/w-1"
-        ).respond(200)
+        respx.get("https://europe-tr1.huly.app/api/v1/account/w-1").respond(json={"_id": "acc-1"})
+        respx.get("https://europe-tr1.huly.app/api/v1/ping/w-1").respond(200)
 
         import unittest.mock as mock
+
         with mock.patch("huly_cli.auth.save_auth"):
             auth = await auth_module.login_otp(cloud_config, "123456")
 
@@ -282,6 +276,7 @@ async def test_login_otp_requires_code(cloud_config):
 async def test_select_workspace_missing_token_raises_auth_error(cloud_config):
     def handler(request):
         import json as _json
+
         method = _json.loads(request.content)["method"]
         if method == "login":
             return httpx.Response(200, json={"result": {"token": "acct"}})
@@ -298,37 +293,41 @@ async def test_select_workspace_missing_token_raises_auth_error(cloud_config):
 
 async def test_self_hosted_ignores_select_workspace_endpoint(fake_config):
     """Self-hosted login must keep its /_transactor base even if the response carries an endpoint."""
+
     def handler(request):
         import json as _json
+
         method = _json.loads(request.content)["method"]
         if method == "login":
             return httpx.Response(200, json={"result": {"token": "acct-tok"}})
         if method == "selectWorkspace":
             # Hypothetical future server-side change that populates endpoint.
-            return httpx.Response(200, json={
-                "result": {
-                    "token": "ws-tok",
-                    "workspaceId": "w-1",
-                    "endpoint": "wss://internal-transactor.example.com",
-                }
-            })
+            return httpx.Response(
+                200,
+                json={
+                    "result": {
+                        "token": "ws-tok",
+                        "workspaceId": "w-1",
+                        "endpoint": "wss://internal-transactor.example.com",
+                    }
+                },
+            )
         if method == "getUserWorkspaces":
-            return httpx.Response(200, json={
-                "result": [{"workspaceUrl": "test-ws", "uuid": "uuid-1"}]
-            })
+            return httpx.Response(
+                200, json={"result": [{"workspaceUrl": "test-ws", "uuid": "uuid-1"}]}
+            )
         return httpx.Response(500)
 
     with respx.mock:
         respx.post(SELF_HOSTED_ACCOUNTS_URL).mock(side_effect=handler)
         # Asserts the override was NOT applied: requests still go via /_transactor.
-        respx.get(
-            "https://test.example.com/_transactor/api/v1/account/w-1"
-        ).respond(json={"_id": "acc-1"})
-        respx.get(
-            "https://test.example.com/_transactor/api/v1/ping/w-1"
-        ).respond(200)
+        respx.get("https://test.example.com/_transactor/api/v1/account/w-1").respond(
+            json={"_id": "acc-1"}
+        )
+        respx.get("https://test.example.com/_transactor/api/v1/ping/w-1").respond(200)
 
         import unittest.mock as mock
+
         with mock.patch("huly_cli.auth.save_auth"):
             auth = await auth_module.login(fake_config)
 
@@ -338,17 +337,16 @@ async def test_self_hosted_ignores_select_workspace_endpoint(fake_config):
 async def test_cloud_getuserworkspaces_missing_workspace_raises(cloud_config):
     def handler(request):
         import json as _json
+
         method = _json.loads(request.content)["method"]
         if method == "login":
             return httpx.Response(200, json={"result": {"token": "acct"}})
         if method == "selectWorkspace":
-            return httpx.Response(200, json={
-                "result": {"token": "ws", "workspaceId": "w-1"}
-            })
+            return httpx.Response(200, json={"result": {"token": "ws", "workspaceId": "w-1"}})
         # workspace list does not contain the requested slug
-        return httpx.Response(200, json={"result": [
-            {"workspaceUrl": "other-ws", "uuid": "other-uuid"}
-        ]})
+        return httpx.Response(
+            200, json={"result": [{"workspaceUrl": "other-ws", "uuid": "other-uuid"}]}
+        )
 
     with respx.mock:
         respx.post(CLOUD_ACCOUNTS_URL).mock(side_effect=handler)

@@ -80,8 +80,7 @@ def _require_str(result: dict, key: str, method: str) -> str:
     value = result.get(key)
     if not value or not isinstance(value, str):
         raise AuthError(
-            f"{method} failed: response did not include a '{key}' "
-            "in the 'result' payload."
+            f"{method} failed: response did not include a '{key}' in the 'result' payload."
         )
     return value
 
@@ -114,7 +113,11 @@ async def login(config: HulyConfig) -> AuthCache:
         account_token = _require_str(result, "token", "Login")
 
         return await _complete_login(
-            http, config, accounts_url, transactor_base, account_token,
+            http,
+            config,
+            accounts_url,
+            transactor_base,
+            account_token,
         )
 
 
@@ -145,7 +148,11 @@ async def login_otp(config: HulyConfig, code: str) -> AuthCache:
         account_token = _require_str(result, "token", "OTP login")
 
         return await _complete_login(
-            http, config, accounts_url, transactor_base, account_token,
+            http,
+            config,
+            accounts_url,
+            transactor_base,
+            account_token,
         )
 
 
@@ -178,8 +185,12 @@ async def _complete_login(
         self_hosted=[config.workspace, "external"],
     )
     body = await _rpc(
-        http, accounts_url, "selectWorkspace", select_params,
-        token=account_token, request_id="2",
+        http,
+        accounts_url,
+        "selectWorkspace",
+        select_params,
+        token=account_token,
+        request_id="2",
     )
     ws_result = _require_result_dict(body, "Select workspace")
     workspace_token = _require_str(ws_result, "token", "Select workspace")
@@ -201,14 +212,16 @@ async def _complete_login(
 
     ws_list_params = _params(config, cloud={}, self_hosted=[])
     body = await _rpc(
-        http, accounts_url, "getUserWorkspaces", ws_list_params,
-        token=account_token, request_id="3",
+        http,
+        accounts_url,
+        "getUserWorkspaces",
+        ws_list_params,
+        token=account_token,
+        request_id="3",
     )
     workspaces = body.get("result") or []
     if not isinstance(workspaces, list):
-        raise AuthError(
-            "getUserWorkspaces failed: unexpected response shape (expected list)."
-        )
+        raise AuthError("getUserWorkspaces failed: unexpected response shape (expected list).")
     workspace_uuid = ""
     for ws in workspaces:
         if not isinstance(ws, dict):
