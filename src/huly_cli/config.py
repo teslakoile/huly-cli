@@ -37,6 +37,7 @@ class AuthCache:
     workspace_slug: str
     account_id: str  # for modifiedBy in write ops
     cached_at: float  # unix timestamp
+    transactor_base: str = ""  # REST base URL for transactor
 
 
 def _load_toml_config() -> dict[str, Any]:
@@ -113,6 +114,7 @@ def load_auth() -> AuthCache | None:
             workspace_slug=data["workspace_slug"],
             account_id=data["account_id"],
             cached_at=data["cached_at"],
+            transactor_base=data.get("transactor_base", ""),
         )
     except (KeyError, json.JSONDecodeError, OSError):
         return None
@@ -130,6 +132,7 @@ def save_auth(auth: AuthCache) -> None:
         "workspace_slug": auth.workspace_slug,
         "account_id": auth.account_id,
         "cached_at": auth.cached_at,
+        "transactor_base": auth.transactor_base,
     }
     AUTH_FILE.write_text(json.dumps(data, indent=2))
     AUTH_FILE.chmod(0o600)

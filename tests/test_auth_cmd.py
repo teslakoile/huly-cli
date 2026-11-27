@@ -67,7 +67,7 @@ def test_auth_login_uses_config_credentials_when_flags_omitted():
         url="https://huly.example.com",
         workspace="fake-ws",
         email="env-user@example.com",
-        password="env-pass",
+        password="fake_test_password",  # pragma: allowlist secret
     )
     login_mock = AsyncMock(return_value=FAKE_AUTH)
 
@@ -189,6 +189,158 @@ def test_auth_login_propagates_generic_error_with_exit_code_1():
 
     assert result.exit_code == 1
     login_mock.assert_awaited_once()
+
+
+# ── auth login-otp ────────────────────────────────────────────────────────────
+
+
+def _otp_config() -> HulyConfig:
+    return HulyConfig(
+        url="https://app.huly.app",
+        workspace="fake-ws",
+        email="user@example.com",
+        password=None,
+    )
+
+
+def test_auth_login_otp_with_code_flag_skips_send():
+    """--code provided: send_otp must NOT be called; login_otp completes the flow."""
+    fake_config = _otp_config()
+    send_mock = AsyncMock()
+    login_otp_mock = AsyncMock(return_value=FAKE_AUTH)
+    save_config_mock = MagicMock()
+
+    with (
+        patch("huly_cli.commands.auth_cmd.load_config", MagicMock(return_value=fake_config)),
+        patch("huly_cli.commands.auth_cmd.save_config", save_config_mock),
+        patch("huly_cli.commands.auth_cmd.send_otp", send_mock),
+        patch("huly_cli.commands.auth_cmd.login_otp", login_otp_mock),
+    ):
+        result = runner.invoke(app, ["auth", "login-otp", "--code", "123456"])
+
+    assert result.exit_code == 0, result.output
+    assert "Logged in as" in result.output
+    send_mock.assert_not_awaited()
+    login_otp_mock.assert_awaited_once()
+    # config arg first, code arg second
+    assert login_otp_mock.await_args.args[1] == "123456"
+    save_config_mock.assert_called_once()
+
+
+def test_auth_login_otp_without_code_in_non_tty_errors_after_send():
+    """No --code in non-TTY: send_otp runs, then the prompt fallback raises and exits non-zero."""
+    fake_config = _otp_config()
+    send_mock = AsyncMock()
+    login_otp_mock = AsyncMock(return_value=FAKE_AUTH)
+
+    with (
+        patch("huly_cli.commands.auth_cmd.load_config", MagicMock(return_value=fake_config)),
+        patch("huly_cli.commands.auth_cmd.save_config", MagicMock()),
+        patch("huly_cli.commands.auth_cmd.send_otp", send_mock),
+        patch("huly_cli.commands.auth_cmd.login_otp", login_otp_mock),
+    ):
+        result = runner.invoke(app, ["auth", "login-otp"])
+
+    assert result.exit_code != 0
+    login_otp_mock.assert_not_awaited()
+
+
+def test_auth_login_otp_send_otp_auth_error_exits_2():
+    """send_otp raising AuthError surfaces as exit code 2; login_otp is never reached."""
+    fake_config = _otp_config()
+    send_mock = AsyncMock(side_effect=AuthError("Email not found"))
+    login_otp_mock = AsyncMock(return_value=FAKE_AUTH)
+
+    with (
+        patch("huly_cli.commands.auth_cmd.load_config", MagicMock(return_value=fake_config)),
+        patch("huly_cli.commands.auth_cmd.save_config", MagicMock()),
+        patch("huly_cli.commands.auth_cmd.send_otp", send_mock),
+        patch("huly_cli.commands.auth_cmd.login_otp", login_otp_mock),
+    ):
+        result = runner.invoke(app, ["auth", "login-otp"])
+
+    assert result.exit_code == 2
+    send_mock.assert_awaited_once()
+    login_otp_mock.assert_not_awaited()
+
+
+def test_auth_login_otp_login_otp_auth_error_exits_2():
+    """AuthError raised from login_otp() surfaces as exit code 2."""
+    fake_config = _otp_config()
+    login_otp_mock = AsyncMock(side_effect=AuthError("Bad code"))
+
+    with (
+        patch("huly_cli.commands.auth_cmd.load_config", MagicMock(return_value=fake_config)),
+        patch("huly_cli.commands.auth_cmd.save_config", MagicMock()),
+        patch("huly_cli.commands.auth_cmd.send_otp", AsyncMock()),
+        patch("huly_cli.commands.auth_cmd.login_otp", login_otp_mock),
+    ):
+        result = runner.invoke(app, ["auth", "login-otp", "--code", "000000"])
+
+    assert result.exit_code == 2
+    login_otp_mock.assert_awaited_once()
+
+
+def test_auth_login_otp_generic_error_exits_1():
+    """A non-AuthError exception from login_otp surfaces as exit code 1."""
+    fake_config = _otp_config()
+    login_otp_mock = AsyncMock(side_effect=RuntimeError("network down"))
+
+    with (
+        patch("huly_cli.commands.auth_cmd.load_config", MagicMock(return_value=fake_config)),
+        patch("huly_cli.commands.auth_cmd.save_config", MagicMock()),
+        patch("huly_cli.commands.auth_cmd.send_otp", AsyncMock()),
+        patch("huly_cli.commands.auth_cmd.login_otp", login_otp_mock),
+    ):
+        result = runner.invoke(app, ["auth", "login-otp", "--code", "123456"])
+
+    assert result.exit_code == 1
+    login_otp_mock.assert_awaited_once()
+
+
+def test_auth_login_otp_errors_when_email_missing_in_non_tty():
+    """auth login-otp without email and without TTY should exit non-zero before send_otp."""
+    fake_config = HulyConfig(
+        url="https://app.huly.app",
+        workspace="fake-ws",
+        email=None,
+    )
+    send_mock = AsyncMock()
+    login_otp_mock = AsyncMock(return_value=FAKE_AUTH)
+
+    with (
+        patch("huly_cli.commands.auth_cmd.load_config", MagicMock(return_value=fake_config)),
+        patch("huly_cli.commands.auth_cmd.save_config", MagicMock()),
+        patch("huly_cli.commands.auth_cmd.send_otp", send_mock),
+        patch("huly_cli.commands.auth_cmd.login_otp", login_otp_mock),
+    ):
+        result = runner.invoke(app, ["auth", "login-otp", "--code", "123456"])
+
+    assert result.exit_code != 0
+    send_mock.assert_not_awaited()
+    login_otp_mock.assert_not_awaited()
+
+
+def test_auth_login_otp_errors_when_workspace_missing_in_non_tty():
+    """auth login-otp with email but no workspace (non-tty) should exit non-zero."""
+    fake_config = HulyConfig(
+        url="https://app.huly.app",
+        workspace="",
+        email="user@example.com",
+    )
+    send_mock = AsyncMock()
+    login_otp_mock = AsyncMock(return_value=FAKE_AUTH)
+
+    with (
+        patch("huly_cli.commands.auth_cmd.load_config", MagicMock(return_value=fake_config)),
+        patch("huly_cli.commands.auth_cmd.save_config", MagicMock()),
+        patch("huly_cli.commands.auth_cmd.send_otp", send_mock),
+        patch("huly_cli.commands.auth_cmd.login_otp", login_otp_mock),
+    ):
+        result = runner.invoke(app, ["auth", "login-otp", "--code", "123456"])
+
+    assert result.exit_code != 0
+    login_otp_mock.assert_not_awaited()
 
 
 # ── auth status ───────────────────────────────────────────────────────────────
